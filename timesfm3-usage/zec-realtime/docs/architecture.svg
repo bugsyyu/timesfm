@@ -1,0 +1,185 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 1180" width="1240" height="1180"
+     font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif">
+<style>
+  :root {
+    --bg:#f6f7f9; --card:#ffffff; --zone:#eef0f3; --ext:#e9edf2; --hair:#dfe3e8;
+    --t1:#0d1117; --t2:#5b636e; --t3:#878f9a;
+    --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#0a0b0d; --card:#121418; --zone:#101317; --ext:#141920; --hair:#242932;
+      --t1:#f0f3f7; --t2:#98a1ae; --t3:#69717e;
+      --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+    }
+  }
+  .bgr { fill: var(--bg); }
+  .card { fill: var(--card); stroke: var(--hair); stroke-width: 1; }
+  .zone { fill: var(--zone); stroke: var(--hair); stroke-width: 1; }
+  .ext  { fill: var(--ext);  stroke: var(--hair); stroke-width: 1; }
+  .t1 { fill: var(--t1); } .t2 { fill: var(--t2); } .t3 { fill: var(--t3); }
+  .s1c { fill: var(--s1); } .s2c { fill: var(--s2); } .s3c { fill: var(--s3); }
+  .bar-s1 { fill: var(--s1); } .bar-s2 { fill: var(--s2); } .bar-s3 { fill: var(--s3); }
+  .mono { font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace; }
+  .arrow { stroke: var(--t3); stroke-width: 1.5; fill: none; }
+  .axis { stroke: var(--hair); stroke-width: 1.5; }
+  .tick { stroke: var(--t3); stroke-width: 1; }
+  .rule { stroke: var(--hair); stroke-width: 1; }
+  .join { stroke: var(--t3); stroke-width: 1; stroke-dasharray: 3 3; opacity: .7; }
+  .conn-s3 { stroke: var(--s3); stroke-width: 2; }
+  .conn-s1 { stroke: var(--s1); stroke-width: 2; }
+  .dot-s3 { fill: var(--s3); } .dot-s1 { fill: var(--s1); }
+  .chip-s3 { fill: var(--card); stroke: var(--s3); stroke-width: 1.5; }
+  .chip-s1 { fill: var(--card); stroke: var(--s1); stroke-width: 1.5; }
+</style>
+<defs>
+  <marker id="ah" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+    <path d="M0,0 L6,3 L0,6 z" fill="currentColor" class="t3" style="fill:var(--t3)"/>
+  </marker>
+  <marker id="ah3" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+    <path d="M0,0 L6,3 L0,6 z" style="fill:var(--hair)"/>
+  </marker>
+</defs>
+<rect width="1240" height="1180" class="bgr"/>
+<text x="40" y="44" class="t1" font-size="19" text-anchor="start" font-weight="640">ZEC 实时预测 · 系统架构</text>
+<text x="40" y="68" class="t3" font-size="12.5" text-anchor="start" font-weight="400">每 20 秒拉一次行情，每根 5 分钟 K 线收盘跑一次三配置预测，预测先落库、K 线后到、靠 JOIN 结算</text>
+<rect x="40" y="92" width="1160" height="128" rx="12" class="ext" />
+<text x="58" y="119" class="t1" font-size="14" text-anchor="start" font-weight="620">OKX 公共 API</text>
+<text x="190" y="119" class="t3" font-size="11.5" text-anchor="start" font-weight="400">无需 API Key · 四个 rubik 接口按币种聚合（ccy=ZEC），描述的是全市场 ZEC 合约</text>
+<text x="58" y="144" class="t2" font-size="11.5" text-anchor="start" font-weight="600">行情</text>
+<text x="110" y="144" class="s1c mono" font-size="11.5" text-anchor="start" font-weight="400">/api/v5/market/candles</text>
+<text x="290" y="144" class="t3" font-size="11" text-anchor="start" font-weight="400">5m OHLCV（confirm=1 才要）</text>
+<text x="110" y="166" class="s1c mono" font-size="11.5" text-anchor="start" font-weight="400">/api/v5/market/ticker</text>
+<text x="290" y="166" class="t3" font-size="11" text-anchor="start" font-weight="400">最新价 / 24h 开盘，仅供页头</text>
+<text x="600" y="148" class="t2" font-size="11.5" text-anchor="start" font-weight="600">衍生品</text>
+<text x="660" y="132" class="t3" font-size="10" text-anchor="start" font-weight="400">前缀 /api/v5/rubik/stat/</text>
+<text x="660" y="148" class="s3c mono" font-size="11" text-anchor="start" font-weight="400">taker-volume</text>
+<text x="930" y="148" class="t3" font-size="10.5" text-anchor="start" font-weight="400">主动买卖占比 · 只留 72 桶 → 5.9h 上限</text>
+<text x="660" y="165" class="s3c mono" font-size="11" text-anchor="start" font-weight="400">contracts/long-short-account-ratio</text>
+<text x="930" y="165" class="t3" font-size="10.5" text-anchor="start" font-weight="400">多空人数比</text>
+<text x="660" y="182" class="s3c mono" font-size="11" text-anchor="start" font-weight="400">margin/loan-ratio</text>
+<text x="930" y="182" class="t3" font-size="10.5" text-anchor="start" font-weight="400">杠杆多空比</text>
+<text x="660" y="199" class="s3c mono" font-size="11" text-anchor="start" font-weight="400">contracts/open-interest-volume</text>
+<text x="930" y="199" class="t3" font-size="10.5" text-anchor="start" font-weight="400">合约持仓量</text>
+<text x="660" y="216" class="s3c mono" font-size="11" text-anchor="start" font-weight="400">/api/v5/public/funding-rate(-history)</text>
+<text x="930" y="216" class="t3" font-size="10.5" text-anchor="start" font-weight="400">资金费率</text>
+<line x1="620.0" y1="224" x2="620.0" y2="262" class="arrow" marker-end="url(#ah)"/>
+<text x="630.0" y="246" class="t3" font-size="11.5" text-anchor="start" font-weight="500">每 20 秒 · asyncio.gather 并发 6 个端点 · 失败退避重试</text>
+<rect x="30" y="270" width="1180" height="208" rx="12" class="zone" />
+<text x="46" y="294" class="t2" font-size="12" text-anchor="start" font-weight="600">后端 · Python</text>
+<text x="140" y="294" class="t3" font-size="11" text-anchor="start" font-weight="400">FastAPI + uvicorn，单实例</text>
+<rect x="46" y="308" width="278" height="152" rx="12" class="card" />
+<rect x="46" y="308" width="4" height="152" rx="2" class="bar-s1"/>
+<text x="64" y="332" class="t1 mono" font-size="13.5" text-anchor="start" font-weight="640">okx.py</text>
+<text x="64" y="352" class="s1c" font-size="11.5" text-anchor="start" font-weight="600">异步客户端</text>
+<text x="64" y="376" class="t3" font-size="11" text-anchor="start" font-weight="400">· 6 个端点 → dataclass</text>
+<text x="64" y="395" class="t3" font-size="11" text-anchor="start" font-weight="400">· 字符串转 float、统一升序</text>
+<text x="64" y="414" class="t3" font-size="11" text-anchor="start" font-weight="400">· 重试 / 退避</text>
+<line x1="326" y1="384" x2="338" y2="384" class="arrow" marker-end="url(#ah)"/>
+<rect x="340" y="308" width="278" height="152" rx="12" class="card" />
+<rect x="340" y="308" width="4" height="152" rx="2" class="bar-s2"/>
+<text x="358" y="332" class="t1 mono" font-size="13.5" text-anchor="start" font-weight="640">features.py</text>
+<text x="358" y="352" class="s2c" font-size="11.5" text-anchor="start" font-weight="600">13 通道 + 对齐</text>
+<text x="358" y="376" class="t3" font-size="11" text-anchor="start" font-weight="400">· 8 技术 + 5 衍生品</text>
+<text x="358" y="395" class="t3" font-size="11" text-anchor="start" font-weight="400">· 80 根预热后切片</text>
+<text x="358" y="414" class="t3" font-size="11" text-anchor="start" font-weight="400">· 丢掉未收敛的桶</text>
+<line x1="620" y1="384" x2="632" y2="384" class="arrow" marker-end="url(#ah)"/>
+<rect x="634" y="308" width="278" height="152" rx="12" class="card" />
+<rect x="634" y="308" width="4" height="152" rx="2" class="bar-s3"/>
+<text x="652" y="332" class="t1 mono" font-size="13.5" text-anchor="start" font-weight="640">forecaster.py</text>
+<text x="652" y="352" class="s3c" font-size="11.5" text-anchor="start" font-weight="600">TimesFM 3.0</text>
+<text x="652" y="376" class="t3" font-size="11" text-anchor="start" font-weight="400">· A / B / C 各一次调用</text>
+<text x="652" y="395" class="t3" font-size="11" text-anchor="start" font-weight="400">· 71 根上下文 → 12 步</text>
+<text x="652" y="414" class="t3" font-size="11" text-anchor="start" font-weight="400">· 中位数 + 9 分位</text>
+<line x1="914" y1="384" x2="926" y2="384" class="arrow" marker-end="url(#ah)"/>
+<rect x="928" y="308" width="278" height="152" rx="12" class="card" />
+<rect x="928" y="308" width="4" height="152" rx="2" class="bar-s1"/>
+<text x="946" y="332" class="t1 mono" font-size="13.5" text-anchor="start" font-weight="640">store.py</text>
+<text x="946" y="352" class="s1c" font-size="11.5" text-anchor="start" font-weight="600">SQLite</text>
+<text x="946" y="376" class="t3" font-size="11" text-anchor="start" font-weight="400">· bars / forecasts</text>
+<text x="946" y="395" class="t3" font-size="11" text-anchor="start" font-weight="400">· forecast_points</text>
+<text x="946" y="414" class="t3" font-size="11" text-anchor="start" font-weight="400">· channel_windows</text>
+<line x1="620.0" y1="480" x2="620.0" y2="508" class="arrow" marker-end="url(#ah)"/>
+<rect x="30" y="516" width="1180" height="86" rx="12" class="zone" />
+<text x="46" y="540" class="t1 mono" font-size="13" text-anchor="start" font-weight="640">app.py</text>
+<text x="120" y="540" class="t2" font-size="11.5" text-anchor="start" font-weight="600">HTTP 接口</text>
+<text x="46" y="568" class="s1c mono" font-size="11.5" text-anchor="start" font-weight="400">/api/state</text>
+<text x="46" y="586" class="t3" font-size="10" text-anchor="start" font-weight="400">页面要的全部：行情 · 三条预测 · 准确度 · 通道 · 结算记录</text>
+<text x="346" y="568" class="s1c mono" font-size="11.5" text-anchor="start" font-weight="400">/api/metrics</text>
+<text x="346" y="586" class="t3" font-size="10" text-anchor="start" font-weight="400">各配置准确度，含按提前量分解</text>
+<text x="611" y="568" class="s1c mono" font-size="11.5" text-anchor="start" font-weight="400">/api/status</text>
+<text x="611" y="586" class="t3" font-size="10" text-anchor="start" font-weight="400">引擎 · 窗口 · 轮询 · 各通道实测覆盖率</text>
+<text x="876" y="568" class="s1c mono" font-size="11.5" text-anchor="start" font-weight="400">/api/healthz</text>
+<text x="876" y="586" class="t3" font-size="10" text-anchor="start" font-weight="400">连续失败 5 次返回 503</text>
+<line x1="620.0" y1="612" x2="620.0" y2="640" class="arrow" marker-end="url(#ah)"/>
+<text x="630.0" y="630" class="t3" font-size="11.5" text-anchor="start" font-weight="500">每 15 秒 GET /api/state（只 setData，不重建图表）</text>
+<rect x="30" y="648" width="1180" height="92" rx="12" class="zone" />
+<text x="46" y="672" class="t1 mono" font-size="13" text-anchor="start" font-weight="640">static/index.html</text>
+<text x="210" y="672" class="t3" font-size="11" text-anchor="start" font-weight="400">单页 · 零第三方请求（图表库本地打包）</text>
+<text x="46" y="700" class="t2" font-size="11.5" text-anchor="start" font-weight="600">TradingView Lightweight Charts</text>
+<text x="46" y="718" class="t3" font-size="10.5" text-anchor="start" font-weight="400">K 线 + 成交量 + 预测线 + q10–q90 自定义系列</text>
+<text x="476" y="700" class="t2" font-size="11.5" text-anchor="start" font-weight="600">表格视图</text>
+<text x="476" y="718" class="t3" font-size="10.5" text-anchor="start" font-weight="400">准确度 / 按提前量 / 结算明细</text>
+<text x="806" y="700" class="t2" font-size="11.5" text-anchor="start" font-weight="600">13 通道面板</text>
+<text x="806" y="718" class="t3" font-size="10.5" text-anchor="start" font-weight="400">sparkline + 实测覆盖率</text>
+<line x1="30" y1="758" x2="1210" y2="758" class="rule"/>
+<text x="40" y="786" class="t1" font-size="15" text-anchor="start" font-weight="640">为什么准确度天然是样本外的</text>
+<text x="40" y="808" class="t3" font-size="12" text-anchor="start" font-weight="400">预测在它要预测的 K 线还不存在时就已落库；结算只是等那些 K 线自己打印出来，再按时间戳 JOIN。</text>
+<line x1="250.0" y1="936" x2="1130" y2="936" class="axis" marker-end="url(#ah3)"/>
+<line x1="250.0" y1="930" x2="250.0" y2="942" class="tick"/>
+<text x="250.0" y="962" class="t3" font-size="11" text-anchor="middle" font-weight="500">T 收盘</text>
+<line x1="315.0" y1="930" x2="315.0" y2="942" class="tick"/>
+<text x="315.0" y="962" class="t3" font-size="11" text-anchor="middle" font-weight="500">T+5m</text>
+<line x1="380.0" y1="930" x2="380.0" y2="942" class="tick"/>
+<text x="380.0" y="962" class="t3" font-size="11" text-anchor="middle" font-weight="500">T+10m</text>
+<line x1="640.0" y1="930" x2="640.0" y2="942" class="tick"/>
+<text x="640.0" y="962" class="t3" font-size="11" text-anchor="middle" font-weight="500">T+30m</text>
+<line x1="1030.0" y1="930" x2="1030.0" y2="942" class="tick"/>
+<text x="1030.0" y="962" class="t3" font-size="11" text-anchor="middle" font-weight="500">T+60m</text>
+<text x="44" y="854" class="s3c" font-size="12.5" text-anchor="start" font-weight="620">T 时刻一次写入</text>
+<text x="44" y="872" class="t3" font-size="10.5" text-anchor="start" font-weight="400">12 个预测点</text>
+<line x1="315.0" y1="850" x2="1030.0" y2="850" class="conn-s3"/>
+<circle cx="315.0" cy="850" r="4.5" class="dot-s3"/>
+<circle cx="380.0" cy="850" r="4.5" class="dot-s3"/>
+<circle cx="445.0" cy="850" r="4.5" class="dot-s3"/>
+<circle cx="510.0" cy="850" r="4.5" class="dot-s3"/>
+<circle cx="575.0" cy="850" r="4.5" class="dot-s3"/>
+<circle cx="640.0" cy="850" r="4.5" class="dot-s3"/>
+<circle cx="705.0" cy="850" r="4.5" class="dot-s3"/>
+<circle cx="770.0" cy="850" r="4.5" class="dot-s3"/>
+<circle cx="835.0" cy="850" r="4.5" class="dot-s3"/>
+<circle cx="900.0" cy="850" r="4.5" class="dot-s3"/>
+<circle cx="965.0" cy="850" r="4.5" class="dot-s3"/>
+<circle cx="1030.0" cy="850" r="4.5" class="dot-s3"/>
+<text x="44" y="910" class="s1c" font-size="12.5" text-anchor="start" font-weight="620">之后陆续打印</text>
+<text x="44" y="928" class="t3" font-size="10.5" text-anchor="start" font-weight="400">upsert 进 bars</text>
+<line x1="315.0" y1="906" x2="1030.0" y2="906" class="conn-s1"/>
+<circle cx="315.0" cy="906" r="4.5" class="dot-s1"/>
+<circle cx="380.0" cy="906" r="4.5" class="dot-s1"/>
+<circle cx="445.0" cy="906" r="4.5" class="dot-s1"/>
+<circle cx="510.0" cy="906" r="4.5" class="dot-s1"/>
+<circle cx="575.0" cy="906" r="4.5" class="dot-s1"/>
+<circle cx="640.0" cy="906" r="4.5" class="dot-s1"/>
+<circle cx="705.0" cy="906" r="4.5" class="dot-s1"/>
+<circle cx="770.0" cy="906" r="4.5" class="dot-s1"/>
+<circle cx="835.0" cy="906" r="4.5" class="dot-s1"/>
+<circle cx="900.0" cy="906" r="4.5" class="dot-s1"/>
+<circle cx="965.0" cy="906" r="4.5" class="dot-s1"/>
+<circle cx="1030.0" cy="906" r="4.5" class="dot-s1"/>
+<line x1="315.0" y1="856" x2="315.0" y2="900" class="join"/>
+<line x1="380.0" y1="856" x2="380.0" y2="900" class="join"/>
+<line x1="640.0" y1="856" x2="640.0" y2="900" class="join"/>
+<line x1="1030.0" y1="856" x2="1030.0" y2="900" class="join"/>
+<rect x="44" y="990" width="1152" height="92" rx="12" class="card" />
+<text x="66" y="1016" class="t1 mono" font-size="12.5" text-anchor="start" font-weight="600">JOIN forecast_points p  JOIN bars b ON b.ts = p.target_ts</text>
+<text x="66" y="1038" class="t3" font-size="11.5" text-anchor="start" font-weight="400">K 线还没到 → 这个点就不参与统计（pending）；到了 → 立刻结算。没有任何一步能看见未来。</text>
+<text x="66" y="1064" class="t3" font-size="13" text-anchor="start" font-weight="700">·</text>
+<text x="78" y="1064" class="t2" font-size="11.5" text-anchor="start" font-weight="500">MAE / RMSE / MAPE</text>
+<text x="316" y="1064" class="t3" font-size="13" text-anchor="start" font-weight="700">·</text>
+<text x="328" y="1064" class="t2" font-size="11.5" text-anchor="start" font-weight="500">方向准确率</text>
+<text x="496" y="1064" class="t3" font-size="13" text-anchor="start" font-weight="700">·</text>
+<text x="508" y="1064" class="t2" font-size="11.5" text-anchor="start" font-weight="500">80% 覆盖率</text>
+<text x="686" y="1064" class="t3" font-size="13" text-anchor="start" font-weight="700">·</text>
+<text x="698" y="1064" class="t2" font-size="11.5" text-anchor="start" font-weight="500">相对持平基线 &lt;1 才算赢</text>
+<text x="40" y="1118" class="t3" font-size="11.5" text-anchor="start" font-weight="400">没有回填：要给过去某个 T 做预测，需要截止 T 的 5.9 小时主动买卖量比历史，而接口只保留截止此刻的 5.9 小时 —— 所以三种配置只能一起从零累积。</text>
+</svg>

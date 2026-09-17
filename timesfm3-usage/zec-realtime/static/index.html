@@ -1,0 +1,1744 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ZEC 实时预测 · TimesFM 3.0</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%232a78d6'/%3E%3Cpath d='M3 11l3-4 3 2 4-5' stroke='white' stroke-width='1.8' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
+<style>
+  /* ---------------------------------------------------------------- tokens
+     Dark is the primary mode: this is a market terminal, and the surface it
+     is read against most is a dark one. Both modes are selected, not flipped:
+     each has its own neutral steps, and the series hues are the steps that
+     validate against that mode's surface. */
+  :root {
+    color-scheme: light;
+    --bg:             #f6f7f9;
+    --surface-1:      #ffffff;   /* card + chart surface (validated against) */
+    --surface-2:      #f1f3f5;   /* hover, inset rows                        */
+    --surface-3:      #e8ebef;   /* pressed, selected segment                */
+    --hairline:       #e6e9ed;
+    --hairline-firm:  #d6dae0;
+    --text-1:         #0d1117;
+    --text-2:         #5b636e;
+    --text-3:         #878f9a;
+    --series-1:       #2a78d6;   /* A · price only  */
+    --series-2:       #eb6834;   /* B · technicals  */
+    --series-3:       #1baf7a;   /* C · all 13      */
+    --good:           #04724a;
+    --critical:       #b3261e;
+    --band-alpha:     0.12;
+    --shadow-card:    0 1px 2px rgba(13, 17, 23, .04), 0 1px 1px rgba(13, 17, 23, .03);
+    --shadow-pop:     0 8px 28px rgba(13, 17, 23, .12), 0 2px 6px rgba(13, 17, 23, .06);
+    --glow:           rgba(42, 120, 214, .10);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --dark: 1; }
+  }
+  :root[data-theme="dark"] { --dark: 1; }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg:             #0a0b0d;
+      --surface-1:      #121418;
+      --surface-2:      #1a1d23;
+      --surface-3:      #232830;
+      --hairline:       #21252c;
+      --hairline-firm:  #2e333c;
+      --text-1:         #f0f3f7;
+      --text-2:         #98a1ae;
+      --text-3:         #69717e;
+      --series-1:       #3987e5;
+      --series-2:       #d95926;
+      --series-3:       #199e70;
+      --good:           #3fb984;
+      --critical:       #f0736b;
+      --band-alpha:     0.16;
+      --shadow-card:    0 1px 2px rgba(0, 0, 0, .40);
+      --shadow-pop:     0 12px 40px rgba(0, 0, 0, .55), 0 2px 8px rgba(0, 0, 0, .35);
+      --glow:           rgba(57, 135, 229, .14);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg:             #0a0b0d;
+    --surface-1:      #121418;
+    --surface-2:      #1a1d23;
+    --surface-3:      #232830;
+    --hairline:       #21252c;
+    --hairline-firm:  #2e333c;
+    --text-1:         #f0f3f7;
+    --text-2:         #98a1ae;
+    --text-3:         #69717e;
+    --series-1:       #3987e5;
+    --series-2:       #d95926;
+    --series-3:       #199e70;
+    --good:           #3fb984;
+    --critical:       #f0736b;
+    --band-alpha:     0.16;
+    --shadow-card:    0 1px 2px rgba(0, 0, 0, .40);
+    --shadow-pop:     0 12px 40px rgba(0, 0, 0, .55), 0 2px 8px rgba(0, 0, 0, .35);
+    --glow:           rgba(57, 135, 229, .14);
+  }
+
+  /* ---------------------------------------------------------------- base */
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text-1);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text",
+                 "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+                 system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.55;
+    font-feature-settings: "cv05" 1, "ss01" 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  /* Every figure on this page is meant to be compared down a column, so all of
+     them get lining tabular digits rather than only the ones in tables. */
+  .num, table, .value, .stat-value { font-variant-numeric: tabular-nums lining-nums; }
+
+  .wrap { max-width: 1320px; margin: 0 auto; padding: 0 24px 72px; }
+
+  /* ------------------------------------------------------------- topbar */
+  .topbar {
+    position: sticky; top: 0; z-index: 30;
+    margin: 0 -24px 28px;
+    padding: 0 24px;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: saturate(1.6) blur(14px);
+    -webkit-backdrop-filter: saturate(1.6) blur(14px);
+    border-bottom: 1px solid var(--hairline);
+  }
+  .topbar-inner {
+    max-width: 1320px; margin: 0 auto;
+    display: flex; flex-wrap: wrap; gap: 10px 20px;
+    align-items: center; justify-content: space-between;
+    min-height: 60px; padding: 10px 0;
+  }
+  .brand { display: flex; align-items: center; gap: 11px; min-width: 0; }
+  .brand-mark {
+    width: 26px; height: 26px; border-radius: 7px; flex: none;
+    background: linear-gradient(145deg, var(--series-1), var(--series-3));
+    display: grid; place-items: center;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--series-1) 30%, transparent),
+                0 4px 14px var(--glow);
+  }
+  .brand-mark svg { width: 15px; height: 15px; display: block; }
+  .brand-text { min-width: 0; }
+  .brand h1 {
+    font-size: 14.5px; font-weight: 640; margin: 0;
+    letter-spacing: -0.012em; line-height: 1.25; white-space: nowrap;
+  }
+  .brand .sub {
+    font-size: 11.5px; color: var(--text-3); line-height: 1.3;
+    letter-spacing: .005em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .topbar-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11.5px; line-height: 1; font-weight: 500;
+    padding: 6px 10px; border-radius: 7px;
+    border: 1px solid var(--hairline); background: var(--surface-1);
+    color: var(--text-2); white-space: nowrap;
+  }
+  .chip strong { color: var(--text-1); font-weight: 600; }
+  .chip.is-live { color: var(--good); border-color: color-mix(in srgb, var(--good) 28%, var(--hairline)); }
+  .chip.is-stale { color: var(--critical); border-color: color-mix(in srgb, var(--critical) 38%, var(--hairline)); }
+  button.chip { cursor: pointer; font-family: inherit; transition: background .14s, border-color .14s; }
+  button.chip:hover { background: var(--surface-2); border-color: var(--hairline-firm); }
+  button.chip:focus-visible { outline: 2px solid var(--series-1); outline-offset: 2px; }
+
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+  .is-live .dot { animation: pulse 2.4s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+  @media (prefers-reduced-motion: reduce) { .is-live .dot { animation: none; } }
+
+  /* ------------------------------------------------------------- alerts */
+  .alert {
+    display: flex; gap: 10px; align-items: flex-start;
+    border-radius: 10px; padding: 12px 14px; margin-bottom: 16px;
+    font-size: 13px; line-height: 1.5;
+    border: 1px solid color-mix(in srgb, var(--critical) 34%, transparent);
+    background: color-mix(in srgb, var(--critical) 7%, var(--surface-1));
+    color: var(--critical);
+  }
+  .alert[hidden] { display: none; }
+  .alert::before { content: "!"; font-weight: 700; font-size: 12px; line-height: 1.5; flex: none; }
+
+  /* --------------------------------------------------------------- hero */
+  .hero {
+    display: grid; gap: 1px; margin-bottom: 16px;
+    grid-template-columns: minmax(280px, 1.45fr) repeat(3, minmax(150px, 1fr));
+    background: var(--hairline);
+    border: 1px solid var(--hairline);
+    border-radius: 14px; overflow: hidden;
+    box-shadow: var(--shadow-card);
+  }
+  .stat { background: var(--surface-1); padding: 18px 20px 16px; min-width: 0; }
+  .stat-label {
+    font-size: 11px; color: var(--text-3); font-weight: 550;
+    letter-spacing: .055em; text-transform: uppercase; margin-bottom: 7px;
+  }
+  .stat-value {
+    font-size: 25px; font-weight: 620; letter-spacing: -0.028em;
+    line-height: 1.12; color: var(--text-1);
+  }
+  .stat-foot { font-size: 12px; color: var(--text-2); margin-top: 5px; line-height: 1.35; }
+  .stat.is-primary { padding: 18px 22px 16px; position: relative; }
+  .stat.is-primary .stat-value { font-size: 40px; font-weight: 600; letter-spacing: -0.035em; }
+  .hero-spark { height: 34px; margin-top: 8px; }
+  .hero-spark svg { display: block; width: 100%; height: 100%; overflow: visible; }
+  .delta { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; }
+  .delta.up { color: var(--good); }
+  .delta.down { color: var(--critical); }
+  .stat-name {
+    font-size: 17px; font-weight: 620; letter-spacing: -0.015em;
+    line-height: 1.3; display: flex; align-items: center; gap: 8px;
+  }
+  .stat-name .swatch { width: 8px; height: 8px; border-radius: 50%; margin: 0; flex: none; }
+
+  /* ------------------------------------------------------------ filters */
+  .toolbar {
+    display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center;
+    margin-bottom: 20px; padding: 2px;
+  }
+  .field { display: flex; align-items: center; gap: 9px; }
+  .field-label {
+    font-size: 11px; color: var(--text-3); font-weight: 550;
+    letter-spacing: .055em; text-transform: uppercase;
+  }
+  .seg {
+    display: inline-flex; padding: 2px; gap: 2px;
+    border: 1px solid var(--hairline); border-radius: 9px; background: var(--surface-1);
+  }
+  .seg button {
+    border: 0; background: transparent; color: var(--text-2);
+    font: inherit; font-size: 12.5px; font-weight: 500;
+    padding: 5px 11px; border-radius: 7px; cursor: pointer;
+    transition: background .14s, color .14s;
+  }
+  .seg button:hover { background: var(--surface-2); color: var(--text-1); }
+  .seg button[aria-pressed="true"] {
+    background: var(--surface-3); color: var(--text-1); font-weight: 600;
+  }
+  .seg button:focus-visible { outline: 2px solid var(--series-1); outline-offset: 1px; }
+  .toolbar .spacer { margin-left: auto; font-size: 12px; color: var(--text-3); }
+
+  /* -------------------------------------------------------------- cards */
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--hairline);
+    border-radius: 14px; padding: 20px 22px 16px; margin-bottom: 16px;
+    box-shadow: var(--shadow-card);
+  }
+  .card-head { margin-bottom: 16px; }
+  .card h2 {
+    font-size: 14.5px; font-weight: 620; margin: 0 0 4px;
+    letter-spacing: -0.008em; color: var(--text-1);
+  }
+  .card .note { font-size: 12.5px; color: var(--text-2); margin: 0; line-height: 1.6; max-width: 88ch; }
+  .card .note b { color: var(--text-1); font-weight: 600; }
+
+  .chartbox { position: relative; height: 392px; }
+  .chartbox.short { height: 268px; }
+  .plot { position: absolute; inset: 0; }
+  /* Cold start is the first thing a new reader sees, so an empty chart says
+     what it is waiting for instead of leaving a blank 392px hole. */
+  .plot-empty {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    padding: 0 28px; text-align: center; line-height: 1.8;
+    color: var(--text-3); font-size: 13px;
+  }
+  .plot-empty[hidden] { display: none; }
+  /* Exchange-style OHLC readout pinned over the top-left of the plot. It
+     tracks the crosshair and falls back to the newest bar. */
+  .ohlc {
+    position: absolute; left: 10px; top: 6px; z-index: 5;
+    display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline;
+    font-size: 11.5px; color: var(--text-2); pointer-events: none;
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+  .ohlc .pair { font-weight: 600; color: var(--text-1); font-size: 12px; margin-right: 2px; }
+  .ohlc .f { display: inline-flex; gap: 4px; }
+  .ohlc .f b { font-weight: 600; }
+  .ohlc .k { color: var(--text-3); font-weight: 500; }
+  .ohlc .up b, .ohlc .up { color: var(--good); }
+  .ohlc .down b, .ohlc .down { color: var(--critical); }
+  @media (max-width: 640px) { .ohlc { font-size: 10.5px; gap: 2px 8px; } }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 7px 18px; margin: 14px 0 2px; }
+  .legend .item {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 12px; color: var(--text-2); cursor: pointer; user-select: none;
+    padding: 3px 6px; margin: -3px -6px; border-radius: 6px;
+    transition: background .14s, opacity .14s;
+  }
+  .legend .item:hover { background: var(--surface-2); color: var(--text-1); }
+  .legend .item[data-off="true"] { opacity: .38; }
+  .legend .item.static { cursor: default; }
+  .legend .item.static:hover { background: transparent; }
+  .legend .key { width: 15px; height: 2px; border-radius: 1px; flex: none; }
+  .legend .key.dash { height: 0; border-top: 2px dashed currentColor; }
+  .legend .key.area { height: 10px; border-radius: 3px; }
+
+  /* ------------------------------------------------------------ tooltip */
+  .tt {
+    position: absolute; pointer-events: none; opacity: 0;
+    transition: opacity .12s ease;
+    background: var(--surface-1);
+    border: 1px solid var(--hairline-firm);
+    border-radius: 10px; padding: 10px 12px; font-size: 12.5px; min-width: 158px;
+    box-shadow: var(--shadow-pop); z-index: 20;
+  }
+  .tt-title {
+    color: var(--text-3); font-size: 11px; font-weight: 550;
+    letter-spacing: .05em; margin-bottom: 7px; text-transform: uppercase;
+  }
+  .tt-row { display: flex; align-items: center; gap: 9px; margin-top: 4px; }
+  .tt-key { width: 13px; height: 2px; border-radius: 1px; flex: none; }
+  .tt-val {
+    font-weight: 640; color: var(--text-1); min-width: 66px;
+    text-align: right; font-variant-numeric: tabular-nums lining-nums;
+  }
+  .tt-name { color: var(--text-2); font-size: 12px; }
+
+  /* ------------------------------------------------------------- tables */
+  .tablewrap { overflow-x: auto; margin: 0 -22px; padding: 0 22px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th {
+    font-size: 11px; font-weight: 550; color: var(--text-3);
+    letter-spacing: .05em; text-transform: uppercase;
+    text-align: right; padding: 0 12px 9px; white-space: nowrap;
+    border-bottom: 1px solid var(--hairline-firm);
+  }
+  thead th:first-child { text-align: left; padding-left: 2px; }
+  tbody td {
+    text-align: right; padding: 9px 12px;
+    border-bottom: 1px solid var(--hairline); color: var(--text-1);
+  }
+  tbody td:first-child { text-align: left; padding-left: 2px; color: var(--text-1); }
+  tbody tr { transition: background .12s; }
+  tbody tr:hover td { background: var(--surface-2); }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.dim { color: var(--text-2); }
+  /* The winning cell is marked by weight and a tint, never by color alone -
+     the same number is also legible with the tint stripped. */
+  td.best {
+    font-weight: 660; color: var(--good);
+    background: color-mix(in srgb, var(--good) 5%, transparent);
+  }
+  tbody tr:hover td.best { background: color-mix(in srgb, var(--good) 9%, transparent); }
+  .swatch {
+    display: inline-block; width: 14px; height: 2px; border-radius: 1px;
+    vertical-align: middle; margin-right: 9px;
+  }
+  .rowname { display: inline-flex; align-items: center; font-weight: 550; }
+
+  /* ---------------------------------------------------------- channels */
+  .grouphead {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 11px; color: var(--text-3); font-weight: 550;
+    letter-spacing: .055em; text-transform: uppercase;
+    margin: 4px 0 12px;
+  }
+  .grouphead::after {
+    content: ""; flex: 1; height: 1px; background: var(--hairline);
+  }
+  .chgrid {
+    display: grid; gap: 10px; margin-bottom: 20px;
+    grid-template-columns: repeat(auto-fill, minmax(205px, 1fr));
+  }
+  .chgrid:last-child { margin-bottom: 4px; }
+  /* A column layout with the sparkline as the flexible row keeps all 13 tiles
+     the same height whatever the label lengths do. */
+  .ch {
+    display: flex; flex-direction: column; min-height: 142px;
+    border: 1px solid var(--hairline); border-radius: 11px;
+    padding: 12px 13px 11px; background: var(--surface-1);
+    transition: border-color .15s, background .15s;
+  }
+  .ch:hover { border-color: var(--hairline-firm); background: var(--surface-2); }
+  .ch-name {
+    display: flex; justify-content: space-between; gap: 8px;
+    align-items: baseline; margin-bottom: 2px;
+  }
+  /* Labels never wrap: a two-line channel name would stagger the whole grid. */
+  .ch-zh {
+    font-size: 12.5px; font-weight: 600; color: var(--text-1);
+    letter-spacing: -0.005em; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; flex: 1 1 auto; min-width: 0;
+  }
+  .ch-en {
+    font-size: 10px; color: var(--text-3); font-weight: 450; text-align: right;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    flex: 0 1 auto; min-width: 0;
+  }
+  .ch-val {
+    font-size: 20px; font-weight: 620; letter-spacing: -0.025em;
+    color: var(--text-1); line-height: 1.2; white-space: nowrap;
+  }
+  .ch-unit { font-size: 11px; color: var(--text-3); font-weight: 450; margin-left: 4px; letter-spacing: 0; }
+  .ch svg { display: block; width: 100%; flex: 1 1 auto; min-height: 30px; margin: 6px 0 0; overflow: visible; }
+  .ch-meta {
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+    font-size: 10px; color: var(--text-3); margin-top: 8px; white-space: nowrap;
+  }
+  .ch-meta .num { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .cov { display: inline-flex; align-items: center; gap: 5px; flex: none; }
+  .cov-bar {
+    width: 22px; height: 3px; border-radius: 2px; overflow: hidden;
+    background: var(--surface-3); flex: none;
+  }
+  .cov-bar span { display: block; height: 100%; background: var(--series-3); border-radius: 2px; }
+
+  .empty {
+    color: var(--text-3); font-size: 13px; padding: 34px 0;
+    text-align: center; line-height: 1.7;
+  }
+
+  /* ------------------------------------------------------------- footer */
+  footer {
+    font-size: 11.5px; color: var(--text-3); line-height: 1.85;
+    border-top: 1px solid var(--hairline); padding-top: 18px; margin-top: 30px;
+  }
+  footer p { margin: 0 0 4px; max-width: 108ch; }
+  footer code {
+    background: var(--surface-2); padding: 1.5px 5px; border-radius: 4px;
+    font-size: 10.5px; color: var(--text-2);
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  /* ------------------------------------------------------------- motion */
+  .card, .hero { animation: rise .4s cubic-bezier(.22, .61, .36, 1) both; }
+  .hero { animation-delay: .02s; }
+  .card:nth-of-type(1) { animation-delay: .04s; }
+  .card:nth-of-type(2) { animation-delay: .06s; }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .card, .hero { animation: none; }
+    * { transition-duration: .01ms !important; }
+  }
+
+  /* --------------------------------------------------------- responsive */
+  @media (max-width: 1040px) {
+    .hero { grid-template-columns: repeat(2, 1fr); }
+    .stat.is-primary { grid-column: 1 / -1; }
+  }
+  @media (max-width: 640px) {
+    .wrap { padding: 0 16px 56px; }
+    .topbar { margin: 0 -16px 22px; padding: 0 16px; }
+    .hero { grid-template-columns: 1fr; }
+    .stat.is-primary .stat-value { font-size: 34px; }
+    .chartbox { height: 300px; }
+    .chartbox.short { height: 240px; }
+    .tablewrap { margin: 0 -22px; padding: 0 22px; }
+    .toolbar { gap: 10px 14px; }
+    .toolbar .spacer { margin-left: 0; width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 16 16" fill="none"><path d="M2.5 11.5l3.2-4.2 2.9 2 4.9-6"
+          stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="brand-text">
+        <h1>ZEC-USDT 实时预测</h1>
+        <div class="sub" id="instSub">ZEC-USDT-SWAP · 5 分钟 K 线 · OKX</div>
+      </div>
+    </div>
+    <div class="topbar-meta">
+      <span class="chip" id="engineBadge">engine —</span>
+      <span class="chip" id="ctxBadge">上下文 —</span>
+      <span class="chip is-live" id="statusBadge"><span class="dot"></span>连接中…</span>
+      <button class="chip" id="themeToggle" type="button" aria-label="切换明暗主题">切换主题</button>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <div class="alert" id="engineAlert" hidden></div>
+  <div class="alert" id="errorAlert" hidden></div>
+
+  <section class="hero">
+    <div class="stat is-primary">
+      <div class="stat-label">最新成交价</div>
+      <div class="stat-value num" id="lastPrice">—</div>
+      <div class="stat-foot num" id="priceChange">24 小时 —</div>
+      <div class="hero-spark" id="heroSpark"></div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">下一根 K 线 · C 全通道</div>
+      <div class="stat-value num" id="nextPred">—</div>
+      <div class="stat-foot num" id="nextPredDelta">等待第一次预测</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">已评分样本</div>
+      <div class="stat-value num" id="scoredN">—</div>
+      <div class="stat-foot num" id="pendingN">待结算 —</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">当前最优配置</div>
+      <div class="stat-name" id="bestConfig">—</div>
+      <div class="stat-foot num" id="bestConfigMae">样本不足</div>
+    </div>
+  </section>
+
+  <div class="toolbar">
+    <div class="field">
+      <span class="field-label">提前量</span>
+      <div class="seg" id="leadSeg"></div>
+    </div>
+    <div class="field">
+      <span class="field-label">历史范围</span>
+      <div class="seg" id="rangeSeg"></div>
+    </div>
+    <div class="field">
+      <span class="field-label">置信带</span>
+      <div class="seg" id="bandSeg"></div>
+    </div>
+    <div class="spacer num" id="updatedAt">—</div>
+  </div>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>实时预测</h2>
+      <p class="note">实线为已收盘的真实价格；三条虚线是三种配置对未来
+        <span id="horizonMin">60</span> 分钟的预测中位数，阴影为所选配置的 q10–q90 区间。
+        预测起点是最近一根已收盘 K 线，三种配置共用同一个 5.9 小时上下文。</p>
+    </div>
+    <div class="chartbox">
+      <div id="liveChart" class="plot"></div>
+      <div class="ohlc" id="liveOHLC"></div>
+      <div class="tt" id="liveTT"></div>
+    </div>
+    <div class="legend" id="liveLegend"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>提前 <span id="leadMinTitle">60</span> 分钟的预测 vs 真实</h2>
+      <p class="note">把每一次「提前 <span id="leadMinTitle2">60</span> 分钟」的预测按其目标时间画出来，
+        与同一时刻的真实收盘价对齐。线离真实价越近，说明该配置在这个提前量上越准。</p>
+    </div>
+    <div class="chartbox"><div id="trackChart" class="plot"></div><div class="tt" id="trackTT"></div></div>
+    <div class="legend" id="trackLegend"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>误差随提前量的变化</h2>
+      <p class="note">每种配置在各提前量上的平均绝对误差（MAE，USDT）。下方表格是同一份数据的数值视图。</p>
+    </div>
+    <div class="chartbox short"><div id="maeChart" class="plot"></div><div class="tt" id="maeTT"></div></div>
+    <div class="legend" id="maeLegend"></div>
+    <div class="tablewrap" style="margin-top:16px"><table id="stepTable"></table></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>准确度对比</h2>
+      <p class="note">仅统计已经有真实 K 线落地的预测点。<b>相对持平基线</b> = 模型 MAE ÷
+        「价格不动」基线 MAE，<b>小于 1</b> 才说明模型真的赢过了随机游走。</p>
+    </div>
+    <div class="tablewrap"><table id="metricTable"></table></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>13 个协变量通道</h2>
+      <p class="note">全部对齐到同一条 5 分钟网格，窗口长度 <span id="ctxNote">71 根 / 355 分钟</span>。
+        「实测」是该通道在窗口内真正被观测到（而非前值填充）的比例。</p>
+    </div>
+    <div id="channelPanel"><div class="empty">等待第一次预测…</div></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>最近已结算的预测</h2>
+      <p class="note">提前量 <span id="leadMinTitle3">60</span> 分钟，按目标时间倒序；数值为预测减真实的误差。</p>
+    </div>
+    <div class="tablewrap"><table id="logTable"></table></div>
+  </section>
+
+  <footer>
+    <p>数据源：OKX 公共行情与衍生品统计接口（<code>/market/candles</code>、
+      <code>/rubik/stat/taker-volume</code>、<code>/rubik/stat/contracts/long-short-account-ratio</code>、
+      <code>/rubik/stat/margin/loan-ratio</code>、<code>/rubik/stat/contracts/open-interest-volume</code>、
+      <code>/public/funding-rate</code>）。四个 rubik 接口按币种聚合，描述的是全市场 ZEC 合约而非单一合约。</p>
+    <p>上下文固定为 5.9 小时：主动买卖量比接口只保留 72 个 5 分钟桶，其中最新一个尚未收敛，剩下 71 根 = 355 分钟。</p>
+    <p>本页面仅用于模型评估与演示，不构成任何投资建议。</p>
+  </footer>
+</div>
+
+<script>
+"use strict";
+
+// ---------------------------------------------------------------- state
+const state = {
+  lead: 12,
+  rangeBars: 96,
+  bandConfig: "full",
+  data: null,
+  charts: {},
+  hidden: new Set(),
+};
+
+const RANGE_CHOICES = [[48, "4 小时"], [96, "8 小时"], [288, "24 小时"]];
+
+/** Lead-time presets, derived from the horizon the server actually runs so the
+ *  selected chip always matches the data behind it. */
+function minutesPerBar() {
+  const s = state.data && state.data.status;
+  return s && s.horizon_bars ? s.horizon_minutes / s.horizon_bars : 5;
+}
+function leadMinutes() { return Math.round(state.lead * minutesPerBar()); }
+
+function leadChoices() {
+  const horizon = (state.data && state.data.definition.horizon_bars) || 12;
+  const perBar = minutesPerBar();
+  const candidates = [1, 3, 6, 12, 24, 36].filter(b => b <= horizon);
+  if (!candidates.includes(horizon)) candidates.push(horizon);
+  return candidates.map(b => [b, Math.round(b * perBar) + " 分钟"]);
+}
+
+const FONT_STACK = '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", '
+  + '"Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif';
+
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+function seriesColor(i) { return cssVar("--series-" + (i + 1)); }
+function withAlpha(hex, alpha) {
+  const h = hex.replace("#", "");
+  const n = parseInt(h.length === 3 ? h.split("").map(c => c + c).join("") : h, 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
+function fmtTime(ms) {
+  const d = new Date(ms);
+  return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+}
+function fmtPrice(v, digits = 2) {
+  return v == null || !isFinite(v) ? "—" : v.toLocaleString("en-US",
+    { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+function fmtNum(v, digits = 2, suffix = "") {
+  return v == null || !isFinite(v) ? "—" : v.toFixed(digits) + suffix;
+}
+/** Config metadata by id, in the fixed order that owns the categorical slots. */
+function configs() { return (state.data && state.data.definition.configs) || []; }
+function colorOf(id) {
+  const i = configs().findIndex(c => c.id === id);
+  return seriesColor(i < 0 ? 0 : i);
+}
+function nameOf(id) {
+  const c = configs().find(x => x.id === id);
+  return c ? c.name_zh : id;
+}
+
+// ---------------------------------------------------------------- chrome
+function buildSegments() {
+  const mk = (host, choices, current, onPick) => {
+    host.textContent = "";
+    for (const [value, label] of choices) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = label;
+      b.setAttribute("aria-pressed", String(value === current));
+      b.addEventListener("click", () => onPick(value));
+      host.appendChild(b);
+    }
+  };
+  const leads = leadChoices();
+  if (!leads.some(([v]) => v === state.lead)) state.lead = leads[leads.length - 1][0];
+  mk(document.getElementById("leadSeg"), leads, state.lead, v => {
+    state.lead = v; refresh();
+  });
+  mk(document.getElementById("rangeSeg"), RANGE_CHOICES, state.rangeBars, v => {
+    state.rangeBars = v; refresh();
+  });
+  const bandChoices = configs().map(c => [c.id, c.name_zh.split(" ")[0]]);
+  mk(document.getElementById("bandSeg"), bandChoices.length ? bandChoices : [["full", "C"]],
+     state.bandConfig, v => { state.bandConfig = v; render(); });
+}
+
+document.getElementById("themeToggle").addEventListener("click", () => {
+  const root = document.documentElement;
+  const dark = root.getAttribute("data-theme") === "dark" ||
+    (!root.hasAttribute("data-theme") && matchMedia("(prefers-color-scheme: dark)").matches);
+  root.setAttribute("data-theme", dark ? "light" : "dark");
+  try { localStorage.setItem("zecfm-theme", dark ? "light" : "dark"); } catch (e) {}
+  if (window.LightweightCharts) repaintCharts();
+  render();
+});
+try {
+  const saved = localStorage.getItem("zecfm-theme");
+  if (saved) document.documentElement.setAttribute("data-theme", saved);
+} catch (e) {}
+
+// ---------------------------------------------------------------- charts
+/* ---------------------------------------------------------------- legend --
+   A legend is always present for two or more series, and clicking an entry
+   toggles that series. Entries marked `fixed` describe a mark that has no
+   separate series to hide (the candles' own up/down colours). */
+function renderLegend(hostId, entries, chartKey) {
+  const host = document.getElementById(hostId);
+  host.textContent = "";
+  for (const e of entries) {
+    const item = document.createElement("div");
+    item.className = "item" + (e.fixed ? " static" : "");
+    if (!e.fixed) {
+      item.setAttribute("data-off", String(state.hidden.has(chartKey + ":" + e.id)));
+    }
+    const key = document.createElement("span");
+    key.className = "key" + (e.dashed ? " dash" : "") + (e.area ? " area" : "");
+    if (e.dashed) { key.style.color = e.color; key.style.width = "16px"; }
+    else key.style.background = e.color;
+    const label = document.createElement("span");
+    label.textContent = e.label;
+    item.append(key, label);
+    if (!e.fixed) {
+      item.addEventListener("click", () => {
+        const token = chartKey + ":" + e.id;
+        if (state.hidden.has(token)) state.hidden.delete(token); else state.hidden.add(token);
+        render();
+      });
+    }
+    host.appendChild(item);
+  }
+}
+
+function visible(chartKey, id) { return !state.hidden.has(chartKey + ":" + id); }
+
+/* ==========================================================================
+   Charts — TradingView Lightweight Charts (Apache-2.0).
+
+   The price views use TradingView's own library rather than a general-purpose
+   charting one: candlesticks, the magnet crosshair, the price-axis last-value
+   badges and the time scale all come from the same code that draws
+   tradingview.com, so the page reads the way a trader expects a chart to read.
+
+   Charts are created once and then fed with setData on each poll. Rebuilding
+   them every 15 seconds would throw away the reader's pan and zoom, which on an
+   interactive price chart is the whole point of having one.
+   ========================================================================== */
+
+const LWC = window.LightweightCharts;
+
+/** Live chart handles, kept across renders so zoom/pan survive a data refresh. */
+const charts = { live: null, track: null, mae: null };
+let chartTheme = null;  // the theme the charts were last built/painted for
+
+function themeKey() { return cssVar("--surface-1") + "|" + cssVar("--text-1"); }
+
+/** Chart chrome from the page's own tokens, so both themes stay in step. */
+function chartOptions() {
+  return {
+    autoSize: true,
+    layout: {
+      background: { type: LWC.ColorType.Solid, color: cssVar("--surface-1") },
+      textColor: cssVar("--text-3"),
+      fontFamily: FONT_STACK,
+      fontSize: 11,
+      attributionLogo: true,   // TradingView's mark stays on TradingView's chart
+    },
+    grid: {
+      vertLines: { color: cssVar("--hairline") },
+      horzLines: { color: cssVar("--hairline") },
+    },
+    rightPriceScale: {
+      borderColor: cssVar("--hairline"),
+      scaleMargins: { top: 0.12, bottom: 0.12 },
+    },
+    timeScale: {
+      borderColor: cssVar("--hairline"),
+      timeVisible: true,
+      secondsVisible: false,
+      rightOffset: 3,
+      barSpacing: 8,
+    },
+    crosshair: {
+      mode: LWC.CrosshairMode.Magnet,
+      vertLine: {
+        color: cssVar("--text-3"), width: 1, style: LWC.LineStyle.Solid,
+        labelBackgroundColor: cssVar("--text-2"),
+      },
+      horzLine: {
+        color: cssVar("--text-3"), width: 1, style: LWC.LineStyle.Solid,
+        labelBackgroundColor: cssVar("--text-2"),
+      },
+    },
+    localization: {
+      locale: "zh-CN",
+      timeFormatter: (ts) => fmtTime(ts * 1000),
+    },
+    handleScale: { axisPressedMouseMove: { price: false } },
+  };
+}
+
+function withTickFormatter(options) {
+  return {
+    ...options,
+    timeScale: { ...options.timeScale, tickMarkFormatter: (ts) => fmtTime(ts * 1000) },
+  };
+}
+
+const toSec = (ms) => Math.floor(ms / 1000);
+
+/* -------------------------------------------------- quantile band series --
+   Lightweight Charts has no built-in interval series, so the q10–q90 fan is a
+   custom series: one filled path between the two quantile edges. Doing it this
+   way (rather than stacking two area series, the usual trick) means the fill is
+   genuinely transparent - the grid still reads through it, and nothing below
+   q10 gets painted over. */
+class BandRenderer {
+  update(data, options) { this._data = data; this._options = options; }
+  draw(target, priceConverter) {
+    const data = this._data, options = this._options;
+    if (!data || !data.bars.length) return;
+    target.useBitmapCoordinateSpace((scope) => {
+      const ctx = scope.context;
+      const pts = data.bars.map((b) => ({
+        x: b.x * scope.horizontalPixelRatio,
+        hi: priceConverter(b.originalData.hi) * scope.verticalPixelRatio,
+        lo: priceConverter(b.originalData.lo) * scope.verticalPixelRatio,
+      }));
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].hi);
+      for (const p of pts) ctx.lineTo(p.x, p.hi);
+      for (let i = pts.length - 1; i >= 0; i--) ctx.lineTo(pts[i].x, pts[i].lo);
+      ctx.closePath();
+      ctx.fillStyle = options.fillColor;
+      ctx.fill();
+      ctx.restore();
+    });
+  }
+}
+
+class BandSeries {
+  constructor() { this._renderer = new BandRenderer(); }
+  priceValueBuilder(d) { return [d.lo, d.hi]; }   // feeds the price-scale autofit
+  isWhitespace(d) { return d.hi === undefined || d.hi === null; }
+  renderer() { return this._renderer; }
+  update(data, options) { this._renderer.update(data, options); }
+  defaultOptions() { return { fillColor: "rgba(27,175,122,0.16)", lastValueVisible: false, priceLineVisible: false }; }
+}
+
+/* ------------------------------------------------------------- tooltips --
+   One readout listing every series at the crosshair, so the pointer never has
+   to land on a line to get a value. Values lead, series names follow. */
+function attachTooltip(chart, boxId, rows, format, titleFormat) {
+  const box = document.getElementById(boxId);
+  chart.subscribeCrosshairMove((param) => {
+    if (!param.time || !param.point || param.point.x < 0 || param.point.y < 0) {
+      box.style.opacity = 0;
+      return;
+    }
+    const entries = [];
+    for (const row of rows()) {
+      const bar = param.seriesData.get(row.series);
+      if (!bar) continue;
+      const value = bar.value !== undefined ? bar.value : bar.close;
+      if (value === undefined || value === null) continue;
+      entries.push({ label: row.label, color: row.color, value });
+    }
+    if (!entries.length) { box.style.opacity = 0; return; }
+
+    box.textContent = "";
+    const title = document.createElement("div");
+    title.className = "tt-title";
+    title.textContent = titleFormat
+      ? titleFormat(param.time)
+      : fmtTime(param.time * 1000);
+    box.appendChild(title);
+    for (const e of entries) {
+      const row = document.createElement("div");
+      row.className = "tt-row";
+      const key = document.createElement("span");
+      key.className = "tt-key";
+      key.style.background = e.color;
+      const val = document.createElement("span");
+      val.className = "tt-val num";
+      val.textContent = format(e.value);
+      const name = document.createElement("span");
+      name.className = "tt-name";
+      name.textContent = e.label;
+      row.append(key, val, name);
+      box.appendChild(row);
+    }
+    box.style.opacity = 1;
+    const w = box.offsetWidth, h = box.offsetHeight;
+    const host = chart.chartElement().getBoundingClientRect();
+    let left = param.point.x + 16;
+    if (left + w > host.width) left = param.point.x - w - 16;
+    let top = param.point.y - h / 2;
+    top = Math.max(4, Math.min(top, host.height - h - 4));
+    box.style.left = Math.max(4, left) + "px";
+    box.style.top = top + "px";
+  });
+}
+
+/** Swaps a plot for a centred message, or back. */
+function setPlotEmpty(plotId, message) {
+  const host = document.getElementById(plotId);
+  if (!host) return;
+  const box = host.parentNode;
+  let note = box.querySelector(".plot-empty");
+  if (message) {
+    if (!note) {
+      note = document.createElement("div");
+      note.className = "plot-empty";
+      box.appendChild(note);
+    }
+    note.textContent = message;
+    note.hidden = false;
+    host.style.visibility = "hidden";
+  } else {
+    if (note) note.hidden = true;
+    host.style.visibility = "";
+  }
+}
+
+/* ------------------------------------------------------------ live chart -- */
+
+/** Formats turnover the way an exchange does: 1.2M rather than 1204312.44. */
+function fmtVolume(v) {
+  if (v == null || !isFinite(v)) return "—";
+  const abs = Math.abs(v);
+  if (abs >= 1e9) return (v / 1e9).toFixed(2) + "B";
+  if (abs >= 1e6) return (v / 1e6).toFixed(2) + "M";
+  if (abs >= 1e3) return (v / 1e3).toFixed(1) + "K";
+  return v.toFixed(0);
+}
+
+/** Paints the O/H/L/C strip over the plot. */
+function paintOhlc(bar, volumeValue) {
+  const host = document.getElementById("liveOHLC");
+  if (!host) return;
+  host.textContent = "";
+  if (!bar || bar.open === undefined) return;
+
+  const up = bar.close >= bar.open;
+  const cls = up ? "up" : "down";
+  const pct = bar.open ? (bar.close / bar.open - 1) * 100 : 0;
+
+  const pair = document.createElement("span");
+  pair.className = "pair";
+  const status = state.data && state.data.status;
+  pair.textContent = (status ? status.inst_id : "ZEC-USDT-SWAP")
+    + " · " + (status ? status.bar : "5m");
+  host.appendChild(pair);
+
+  for (const [key, value] of [["开", bar.open], ["高", bar.high],
+                              ["低", bar.low], ["收", bar.close]]) {
+    const f = document.createElement("span");
+    f.className = "f " + cls;
+    const k = document.createElement("span");
+    k.className = "k";
+    k.textContent = key;
+    const b = document.createElement("b");
+    b.textContent = fmtPrice(value);
+    f.append(k, b);
+    host.appendChild(f);
+  }
+
+  const change = document.createElement("span");
+  change.className = "f " + cls;
+  const cb = document.createElement("b");
+  cb.textContent = (pct >= 0 ? "+" : "") + pct.toFixed(2) + "%";
+  change.appendChild(cb);
+  host.appendChild(change);
+
+  if (volumeValue != null) {
+    const vol = document.createElement("span");
+    vol.className = "f";
+    const k = document.createElement("span");
+    k.className = "k";
+    k.textContent = "成交额";
+    const b = document.createElement("b");
+    b.textContent = fmtVolume(volumeValue);
+    vol.append(k, b);
+    host.appendChild(vol);
+  }
+}
+
+function buildLiveChart() {
+  const host = document.getElementById("liveChart");
+  const chart = LWC.createChart(host, withTickFormatter(chartOptions()));
+
+  // Added before the candles so the fan sits behind the price.
+  const band = chart.addCustomSeries(new BandSeries(), {
+    fillColor: withAlpha(colorOf("full"), parseFloat(cssVar("--band-alpha"))),
+  });
+  const candles = chart.addSeries(LWC.CandlestickSeries, {
+    upColor: cssVar("--good"), downColor: cssVar("--critical"),
+    borderUpColor: cssVar("--good"), borderDownColor: cssVar("--critical"),
+    wickUpColor: cssVar("--good"), wickDownColor: cssVar("--critical"),
+    priceLineVisible: true, priceLineColor: cssVar("--text-3"),
+    priceLineStyle: LWC.LineStyle.Dotted,
+    priceFormat: { type: "price", precision: 2, minMove: 0.01 },
+  });
+  // Turnover sits on its own overlay scale in the bottom quarter, so it reads
+  // under the price without sharing - or distorting - the price axis.
+  const volume = chart.addSeries(LWC.HistogramSeries, {
+    priceFormat: { type: "volume" },
+    priceScaleId: "volume",
+    lastValueVisible: false, priceLineVisible: false,
+  });
+  volume.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+  chart.priceScale("right").applyOptions({ scaleMargins: { top: 0.08, bottom: 0.26 } });
+  const lines = {};
+  for (const c of configs()) {
+    lines[c.id] = chart.addSeries(LWC.LineSeries, {
+      color: colorOf(c.id), lineWidth: 2, lineStyle: LWC.LineStyle.Dashed,
+      // The title rides the price-axis badge - TradingView's own direct label.
+      title: c.name_zh.split(" ")[0],
+      lastValueVisible: true, priceLineVisible: false,
+      crosshairMarkerRadius: 4,
+      priceFormat: { type: "price", precision: 2, minMove: 0.01 },
+    });
+  }
+  charts.live = { chart, band, candles, volume, lines, fitted: false };
+
+  // The readout follows the crosshair and falls back to the newest bar, which
+  // is what an exchange chart does when the pointer leaves the plot.
+  chart.subscribeCrosshairMove((param) => {
+    const bar = param.time ? param.seriesData.get(candles) : null;
+    const vol = param.time ? param.seriesData.get(volume) : null;
+    paintOhlc(bar, vol ? vol.value : null);
+  });
+
+  attachTooltip(chart, "liveTT", () => {
+    const rows = [{ series: candles, label: "真实收盘价", color: cssVar("--text-1") }];
+    for (const c of configs()) {
+      if (visible("live", c.id)) {
+        rows.push({ series: lines[c.id], label: c.name_zh, color: colorOf(c.id) });
+      }
+    }
+    return rows;
+  }, (v) => fmtPrice(v));
+  return charts.live;
+}
+
+function renderLive() {
+  const d = state.data;
+  const bars = d.bars || [];
+  if (!bars.length) return;
+  const h = charts.live || buildLiveChart();
+
+  h.candles.setData(bars.map((b) => ({
+    time: toSec(b.ts), open: b.open, high: b.high, low: b.low, close: b.close,
+  })));
+  h.volume.setData(bars.map((b) => ({
+    time: toSec(b.ts), value: b.volume_quote,
+    color: withAlpha(b.close >= b.open ? cssVar("--good") : cssVar("--critical"), 0.4),
+  })));
+  paintOhlc(bars[bars.length - 1], bars[bars.length - 1].volume_quote);
+
+  const live = d.live || {};
+  const origin = bars[bars.length - 1];
+
+  for (const c of configs()) {
+    const f = live[c.id];
+    const series = h.lines[c.id];
+    const on = visible("live", c.id);
+    series.applyOptions({ visible: on });
+    if (!f || !f.points.length) { series.setData([]); continue; }
+    // Anchor each forecast to the last real print so it grows out of the candles.
+    series.setData([{ time: toSec(origin.ts), value: origin.close }].concat(
+      f.points.map((p) => ({ time: toSec(p.target_ts), value: p.median }))));
+  }
+
+  const bandCfg = state.bandConfig;
+  const bandF = live[bandCfg];
+  const showBand = bandF && bandF.points.length && visible("live", "band");
+  h.band.applyOptions({
+    visible: !!showBand,
+    fillColor: withAlpha(colorOf(bandCfg), parseFloat(cssVar("--band-alpha"))),
+  });
+  h.band.setData(showBand
+    ? [{ time: toSec(origin.ts), lo: origin.close, hi: origin.close }].concat(
+        bandF.points.map((p) => ({ time: toSec(p.target_ts), lo: p.q10, hi: p.q90 })))
+    : []);
+
+  if (!h.fitted) { chartFitVisible(h.chart); h.fitted = true; }
+
+  const legend = [
+    { id: "band", label: `q10–q90 区间（${nameOf(bandCfg)}）`,
+      color: withAlpha(colorOf(bandCfg), 0.5), area: true },
+    { id: "candles", label: "真实 K 线（涨绿 / 跌红）", color: cssVar("--good"), area: true,
+      fixed: true },
+  ];
+  for (const c of configs()) {
+    legend.push({ id: c.id, label: c.name_zh, color: colorOf(c.id), dashed: true });
+  }
+  renderLegend("liveLegend", legend, "live");
+}
+
+/** Shows the recent window rather than every bar, the way a price chart opens. */
+function chartFitVisible(chart) {
+  chart.timeScale().fitContent();
+}
+
+/* ------------------------------------------------------------ track chart -- */
+function buildTrackChart() {
+  const host = document.getElementById("trackChart");
+  const chart = LWC.createChart(host, withTickFormatter(chartOptions()));
+  const actual = chart.addSeries(LWC.LineSeries, {
+    color: cssVar("--text-1"), lineWidth: 2, title: "真实",
+    priceLineVisible: false, crosshairMarkerRadius: 4,
+    priceFormat: { type: "price", precision: 2, minMove: 0.01 },
+  });
+  const lines = {};
+  for (const c of configs()) {
+    lines[c.id] = chart.addSeries(LWC.LineSeries, {
+      color: colorOf(c.id), lineWidth: 2, lineStyle: LWC.LineStyle.Dashed,
+      title: c.name_zh.split(" ")[0], priceLineVisible: false, crosshairMarkerRadius: 4,
+      priceFormat: { type: "price", precision: 2, minMove: 0.01 },
+    });
+  }
+  charts.track = { chart, actual, lines, fitted: false };
+  attachTooltip(chart, "trackTT", () => {
+    const rows = [{ series: actual, label: "真实收盘价", color: cssVar("--text-1") }];
+    for (const c of configs()) {
+      if (visible("track", c.id)) {
+        rows.push({ series: lines[c.id], label: c.name_zh, color: colorOf(c.id) });
+      }
+    }
+    return rows;
+  }, (v) => fmtPrice(v));
+  return charts.track;
+}
+
+function renderTrack() {
+  const trails = state.data.trails || {};
+  const byTs = new Map();
+  for (const c of configs()) {
+    for (const p of (trails[c.id] || [])) {
+      if (!byTs.has(p.target_ts)) byTs.set(p.target_ts, { actual: p.actual });
+      byTs.get(p.target_ts)[c.id] = p.median;
+    }
+  }
+  const stamps = [...byTs.keys()].sort((a, b) => a - b);
+  const host = document.getElementById("trackLegend");
+
+  if (!stamps.length) {
+    if (charts.track) {
+      charts.track.actual.setData([]);
+      for (const c of configs()) charts.track.lines[c.id].setData([]);
+    }
+    setPlotEmpty("trackChart",
+      `还没有提前 ${leadMinutes()} 分钟的预测完成结算 ——`
+      + `服务再运行 ${leadMinutes()} 分钟，这里就会开始逐点累积。`);
+    host.textContent = "";
+    return;
+  }
+  setPlotEmpty("trackChart", null);
+
+  const h = charts.track || buildTrackChart();
+  h.actual.setData(stamps.map((t) => ({ time: toSec(t), value: byTs.get(t).actual })));
+  h.actual.applyOptions({ visible: visible("track", "actual") });
+  for (const c of configs()) {
+    const series = h.lines[c.id];
+    series.applyOptions({ visible: visible("track", c.id) });
+    series.setData(stamps
+      .filter((t) => byTs.get(t)[c.id] != null)
+      .map((t) => ({ time: toSec(t), value: byTs.get(t)[c.id] })));
+  }
+  if (!h.fitted) { h.chart.timeScale().fitContent(); h.fitted = true; }
+
+  const legend = [{ id: "actual", label: "真实收盘价", color: cssVar("--text-1") }];
+  for (const c of configs()) {
+    legend.push({ id: c.id, label: c.name_zh, color: colorOf(c.id), dashed: true });
+  }
+  renderLegend("trackLegend", legend, "track");
+}
+
+/* -------------------------------------------------------------- MAE chart --
+   Horizontal axis here is lead time, not a clock, so this one is built with
+   createOptionsChart - the library's own numeric-scale chart - rather than
+   bending a time axis into something it is not. */
+function buildMaeChart() {
+  const host = document.getElementById("maeChart");
+  const options = chartOptions();
+  const chart = LWC.createOptionsChart(host, {
+    ...options,
+    timeScale: { ...options.timeScale, rightOffset: 1, barSpacing: 46 },
+    // Note: the numeric horizontal scale formats its own tick marks and ignores
+    // tickMarkFormatter, so the axis shows bare numbers and the legend below
+    // carries the unit.
+    localization: { locale: "zh-CN", timeFormatter: (v) => v + " 分钟" },
+  });
+  const lines = {};
+  for (const c of configs()) {
+    lines[c.id] = chart.addSeries(LWC.LineSeries, {
+      color: colorOf(c.id), lineWidth: 2, title: c.name_zh.split(" ")[0],
+      priceLineVisible: false, crosshairMarkerRadius: 4,
+      pointMarkersVisible: true, pointMarkersRadius: 3,
+      priceFormat: { type: "price", precision: 3, minMove: 0.001 },
+    });
+  }
+  charts.mae = { chart, lines, fitted: false };
+  attachTooltip(chart, "maeTT", () => configs()
+    .filter((c) => visible("mae", c.id))
+    .map((c) => ({ series: lines[c.id], label: c.name_zh, color: colorOf(c.id) })),
+    (v) => fmtNum(v, 3) + " USDT", (t) => "提前 " + t + " 分钟");
+  return charts.mae;
+}
+
+function renderMae() {
+  const metrics = state.data.metrics || [];
+  const series = metrics.map((m) => m.by_step
+    .filter((s) => s.mae != null && isFinite(s.mae))
+    .map((s) => ({ time: s.minutes, value: s.mae })));
+  // One resolved lead time draws a flat line across the plot, which reads as a
+  // result rather than as "not enough data yet". Wait for a second point.
+  const longest = series.reduce((n, pts) => Math.max(n, pts.length), 0);
+
+  if (longest < 2) {
+    if (charts.mae) {
+      for (const c of configs()) charts.mae.lines[c.id].setData([]);
+    }
+    setPlotEmpty("maeChart", longest === 0
+      ? "还没有预测完成结算 —— 第一根 5 分钟 K 线收盘后，这里会开始出现曲线。"
+      : "目前只有一个提前量结算完成，画不出误差曲线；再等几根 K 线。");
+    document.getElementById("maeLegend").textContent = "";
+    renderStepTable();
+    return;
+  }
+  setPlotEmpty("maeChart", null);
+
+  const h = charts.mae || buildMaeChart();
+  let any = false;
+  metrics.forEach((m, i) => {
+    const line = h.lines[m.config_id];
+    if (!line) return;
+    line.applyOptions({ visible: visible("mae", m.config_id) });
+    if (series[i].length) any = true;
+    line.setData(series[i]);
+  });
+  if (any && !h.fitted) { h.chart.timeScale().fitContent(); h.fitted = true; }
+
+  renderLegend("maeLegend", metrics.map((m) => ({
+    id: m.config_id, label: m.name_zh, color: colorOf(m.config_id),
+  })).concat([{ id: "axis", label: "横轴：提前量（分钟）", color: "transparent", fixed: true }]),
+    "mae");
+  renderStepTable();
+}
+
+/* ------------------------------------------------------------ theme swap -- */
+/** Repaints every chart from the current tokens after a light/dark change. */
+function repaintCharts() {
+  const options = chartOptions();
+  for (const key of ["live", "track", "mae"]) {
+    const h = charts[key];
+    if (!h) continue;
+    if (key === "mae") {
+      h.chart.applyOptions({
+        ...options,
+        timeScale: { ...options.timeScale, rightOffset: 1, barSpacing: 46 },
+        localization: { locale: "zh-CN", timeFormatter: (v) => v + " 分钟" },
+      });
+    } else {
+      h.chart.applyOptions(withTickFormatter(options));
+    }
+    if (h.candles) {
+      h.candles.applyOptions({
+        upColor: cssVar("--good"), downColor: cssVar("--critical"),
+        borderUpColor: cssVar("--good"), borderDownColor: cssVar("--critical"),
+        wickUpColor: cssVar("--good"), wickDownColor: cssVar("--critical"),
+        priceLineColor: cssVar("--text-3"),
+      });
+    }
+    if (h.volume && state.data) {
+      const bars = state.data.bars || [];
+      h.volume.setData(bars.map((b) => ({
+        time: toSec(b.ts), value: b.volume_quote,
+        color: withAlpha(b.close >= b.open ? cssVar("--good") : cssVar("--critical"), 0.4),
+      })));
+    }
+    if (h.actual) h.actual.applyOptions({ color: cssVar("--text-1") });
+    if (h.lines) {
+      for (const c of configs()) {
+        if (h.lines[c.id]) h.lines[c.id].applyOptions({ color: colorOf(c.id) });
+      }
+    }
+  }
+}
+
+/** Table view of the MAE chart - also the fallback when the chart library is absent. */
+function renderStepTable() {
+  const metrics = state.data.metrics || [];
+  const steps = (metrics[0] && metrics[0].by_step) || [];
+  const table = document.getElementById("stepTable");
+  table.textContent = "";
+  const thead = table.createTHead().insertRow();
+  for (const h of ["提前量", ...metrics.map(m => m.name_zh), "样本"]) {
+    const th = document.createElement("th");
+    th.textContent = h;
+    thead.appendChild(th);
+  }
+  const tbody = table.createTBody();
+  steps.forEach((s, i) => {
+    const row = tbody.insertRow();
+    const c0 = row.insertCell();
+    c0.className = "rowname";
+    c0.textContent = s.minutes + " 分钟";
+    const values = metrics.map(m => m.by_step[i] && m.by_step[i].mae);
+    const finite = values.filter(v => v != null && isFinite(v));
+    const best = finite.length ? Math.min(...finite) : null;
+    for (const v of values) {
+      const cell = row.insertCell();
+      cell.className = "num" + (best != null && v === best ? " best" : "");
+      cell.textContent = fmtNum(v, 3);
+    }
+    const cn = row.insertCell();
+    cn.className = "num";
+    cn.textContent = metrics.length ? String(metrics[0].by_step[i].n) : "0";
+  });
+}
+
+function renderMetricTable() {
+  const metrics = state.data.metrics || [];
+  const table = document.getElementById("metricTable");
+  table.textContent = "";
+  const head = table.createTHead().insertRow();
+  const cols = ["配置", "协变量", "样本", "MAE", "RMSE", "MAPE", "方向准确率",
+                "80% 覆盖率", "相对持平基线"];
+  for (const h of cols) {
+    const th = document.createElement("th");
+    th.textContent = h;
+    head.appendChild(th);
+  }
+  const maes = metrics.map(m => m.overall.mae).filter(v => v != null);
+  const bestMae = maes.length ? Math.min(...maes) : null;
+  const tbody = table.createTBody();
+  for (const m of metrics) {
+    const row = tbody.insertRow();
+    const nameCell = row.insertCell();
+    const label = document.createElement("span");
+    label.className = "rowname";
+    const sw = document.createElement("span");
+    sw.className = "swatch";
+    sw.style.background = colorOf(m.config_id);
+    label.append(sw, document.createTextNode(m.name_zh));
+    nameCell.appendChild(label);
+    const add = (text, cls) => {
+      const c = row.insertCell();
+      c.className = "num" + (cls ? " " + cls : "");
+      c.textContent = text;
+    };
+    add(String(m.num_covariates), "dim");
+    add(String(m.overall.n), "dim");
+    add(fmtNum(m.overall.mae, 3),
+        bestMae != null && m.overall.mae === bestMae ? "best" : "");
+    add(fmtNum(m.overall.rmse, 3), "dim");
+    add(fmtNum(m.overall.mape, 3, "%"), "dim");
+    add(fmtNum(m.overall.direction_acc, 1, "%"));
+    add(fmtNum(m.overall.coverage_80, 1, "%"));
+    const skill = m.overall.skill;
+    add(fmtNum(skill, 3), skill != null && skill < 1 ? "best" : "");
+  }
+}
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+let sparkSeq = 0;
+
+/** A single-series sparkline: thin stroke over a fading area fill.
+ *  Each tile is its own chart of one series, so the title names it and no
+ *  legend or second hue is needed. */
+function sparkline(values, { color, height = 34, fill = true } = {}) {
+  const stroke = color || cssVar("--series-1");
+  const w = 100, top = 2, bottom = height - 2;
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${w} ${height}`);
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.setAttribute("aria-hidden", "true");
+
+  const lo = Math.min(...values), hi = Math.max(...values);
+  const span = hi - lo || 1;
+  const xy = values.map((v, i) => [
+    (i / (values.length - 1 || 1)) * w,
+    bottom - ((v - lo) / span) * (bottom - top),
+  ]);
+  const points = xy.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join(" ");
+
+  if (fill) {
+    const id = "spark-grad-" + (++sparkSeq);
+    const defs = document.createElementNS(SVG_NS, "defs");
+    const grad = document.createElementNS(SVG_NS, "linearGradient");
+    grad.setAttribute("id", id);
+    grad.setAttribute("x1", "0"); grad.setAttribute("y1", "0");
+    grad.setAttribute("x2", "0"); grad.setAttribute("y2", "1");
+    for (const [offset, opacity] of [["0", "0.17"], ["1", "0"]]) {
+      const stop = document.createElementNS(SVG_NS, "stop");
+      stop.setAttribute("offset", offset);
+      stop.setAttribute("stop-color", stroke);
+      stop.setAttribute("stop-opacity", opacity);
+      grad.appendChild(stop);
+    }
+    defs.appendChild(grad);
+    svg.appendChild(defs);
+
+    const area = document.createElementNS(SVG_NS, "polygon");
+    area.setAttribute("points", `0,${height} ${points} ${w},${height}`);
+    area.setAttribute("fill", `url(#${id})`);
+    svg.appendChild(area);
+  }
+
+  const line = document.createElementNS(SVG_NS, "polyline");
+  line.setAttribute("points", points);
+  line.setAttribute("fill", "none");
+  line.setAttribute("stroke", stroke);
+  line.setAttribute("stroke-width", "1.5");
+  line.setAttribute("stroke-linejoin", "round");
+  line.setAttribute("stroke-linecap", "round");
+  line.setAttribute("vector-effect", "non-scaling-stroke");
+  svg.appendChild(line);
+
+  const [lx, ly] = xy[xy.length - 1];
+  const tip = document.createElementNS(SVG_NS, "circle");
+  tip.setAttribute("cx", lx.toFixed(2));
+  tip.setAttribute("cy", ly.toFixed(2));
+  tip.setAttribute("r", "1.6");
+  tip.setAttribute("fill", stroke);
+  tip.setAttribute("vector-effect", "non-scaling-stroke");
+  svg.appendChild(tip);
+  return svg;
+}
+
+function renderChannels() {
+  const panel = document.getElementById("channelPanel");
+  const win = state.data.channels;
+  panel.textContent = "";
+  if (!win) {
+    const e = document.createElement("div");
+    e.className = "empty";
+    e.textContent = "等待第一次预测…";
+    panel.appendChild(e);
+    return;
+  }
+  const defs = state.data.definition.channels;
+  for (const [group, title] of [["technical", "技术指标 · 8"], ["derivative", "衍生品 · 5"]]) {
+    const head = document.createElement("div");
+    head.className = "grouphead";
+    head.textContent = title;
+    panel.appendChild(head);
+    const grid = document.createElement("div");
+    grid.className = "chgrid";
+    for (const def of defs.filter(d => d.group === group)) {
+      const series = win.channels[def.key] || [];
+      const card = document.createElement("div");
+      card.className = "ch";
+      card.title = def.detail + "\n来源: " + def.source;
+
+      const name = document.createElement("div");
+      name.className = "ch-name";
+      const zh = document.createElement("span");
+      zh.className = "ch-zh";
+      zh.textContent = def.label_zh;
+      const en = document.createElement("span");
+      en.className = "ch-en";
+      en.textContent = def.label_en;
+      name.append(zh, en);
+
+      const val = document.createElement("div");
+      val.className = "ch-val num";
+      val.textContent = series.length ? fmtNum(series[series.length - 1], 3) : "—";
+      const unit = document.createElement("span");
+      unit.className = "ch-unit";
+      unit.textContent = def.unit;
+      val.appendChild(unit);
+
+      card.append(name, val);
+      if (series.length > 1) {
+        card.appendChild(sparkline(series, { height: 36 }));
+      }
+
+      const meta = document.createElement("div");
+      meta.className = "ch-meta";
+      const pct = (win.coverage[def.key] ?? 0) * 100;
+      const cov = document.createElement("span");
+      cov.className = "cov";
+      const bar = document.createElement("span");
+      bar.className = "cov-bar";
+      const barFill = document.createElement("span");
+      barFill.style.width = Math.max(0, Math.min(100, pct)).toFixed(0) + "%";
+      if (pct < 100) barFill.style.background = cssVar("--series-2");
+      bar.appendChild(barFill);
+      cov.append(bar, document.createTextNode("实测 " + pct.toFixed(0) + "%"));
+      const range = document.createElement("span");
+      if (series.length) {
+        range.className = "num";
+        range.textContent = fmtNum(Math.min(...series), 2) + " ~ " + fmtNum(Math.max(...series), 2);
+      }
+      meta.append(cov, range);
+      card.appendChild(meta);
+      grid.appendChild(card);
+    }
+    panel.appendChild(grid);
+  }
+}
+
+function renderLog() {
+  const trails = state.data.trails || {};
+  const table = document.getElementById("logTable");
+  table.textContent = "";
+  const head = table.createTHead().insertRow();
+  for (const h of ["目标时间", "真实价", ...configs().map(c => c.name_zh + " 误差")]) {
+    const th = document.createElement("th");
+    th.textContent = h;
+    head.appendChild(th);
+  }
+  const byTs = new Map();
+  for (const c of configs()) {
+    for (const p of (trails[c.id] || [])) {
+      if (!byTs.has(p.target_ts)) byTs.set(p.target_ts, { actual: p.actual });
+      byTs.get(p.target_ts)[c.id] = p.median - p.actual;
+    }
+  }
+  const stamps = [...byTs.keys()].sort((a, b) => b - a).slice(0, 20);
+  const tbody = table.createTBody();
+  for (const ts of stamps) {
+    const row = tbody.insertRow();
+    const t = row.insertCell();
+    t.textContent = fmtTime(ts);
+    const a = row.insertCell();
+    a.className = "num";
+    a.textContent = fmtPrice(byTs.get(ts).actual);
+    const errs = configs().map(c => byTs.get(ts)[c.id]);
+    const finite = errs.filter(v => v != null && isFinite(v)).map(Math.abs);
+    const best = finite.length ? Math.min(...finite) : null;
+    for (const e of errs) {
+      const cell = row.insertCell();
+      cell.className = "num" + (best != null && Math.abs(e) === best ? " best" : "");
+      cell.textContent = e == null ? "—" : (e > 0 ? "+" : "") + e.toFixed(2);
+    }
+  }
+  if (!stamps.length) {
+    const row = tbody.insertRow();
+    const cell = row.insertCell();
+    cell.colSpan = configs().length + 2;
+    cell.className = "empty";
+    cell.style.textAlign = "center";
+    cell.textContent = "暂无已结算的预测";
+  }
+}
+
+function renderHeader() {
+  const d = state.data;
+  const s = d.status;
+  document.getElementById("instSub").textContent = `${s.inst_id} · ${s.bar} K 线 · OKX`;
+  const engineChip = document.getElementById("engineBadge");
+  engineChip.textContent = "";
+  const engineName = document.createElement("strong");
+  engineName.textContent = s.engine;
+  engineChip.append(engineName,
+    document.createTextNode(s.device ? " · " + s.device : ""));
+  engineChip.classList.toggle("is-stale", !s.is_foundation_model);
+
+  const ctxChip = document.getElementById("ctxBadge");
+  ctxChip.textContent = "";
+  const ctxStrong = document.createElement("strong");
+  ctxStrong.textContent = `${s.context_hours} 小时`;
+  ctxChip.append(document.createTextNode("上下文 "), ctxStrong,
+    document.createTextNode(` · ${s.context_bars} 根 × ${s.bar}`));
+  document.getElementById("ctxNote").textContent =
+    `${s.context_bars} 根 / ${s.context_minutes} 分钟`;
+  document.getElementById("horizonMin").textContent = String(s.horizon_minutes);
+  for (const id of ["leadMinTitle", "leadMinTitle2", "leadMinTitle3"]) {
+    document.getElementById(id).textContent = String(leadMinutes());
+  }
+
+  const alertBox = document.getElementById("engineAlert");
+  if (!s.is_foundation_model) {
+    alertBox.hidden = false;
+    alertBox.textContent =
+      `当前引擎是「${s.engine}」占位基线，不是 TimesFM 预测结果。` +
+      `请在拿到 TimesFM 3.0 权重后用 --engine timesfm 重新启动。`;
+  } else {
+    alertBox.hidden = true;
+  }
+
+  const errBox = document.getElementById("errorAlert");
+  if (s.last_error) {
+    errBox.hidden = false;
+    errBox.textContent = `最近一次轮询失败（连续 ${s.consecutive_errors} 次）：${s.last_error}`;
+  } else {
+    errBox.hidden = true;
+  }
+
+  const badge = document.getElementById("statusBadge");
+  badge.textContent = "";
+  const staleMs = s.server_ms - (s.last_poll_ms || 0);
+  const stale = !s.last_poll_ms || staleMs > s.poll_seconds * 3000;
+  const dot = document.createElement("span");
+  dot.className = "dot";
+  badge.className = "chip " + (stale ? "is-stale" : "is-live");
+  badge.append(dot, document.createTextNode(
+    stale ? "数据陈旧" : `运行中 · ${s.poll_count} 次轮询`));
+  document.getElementById("updatedAt").textContent =
+    s.last_poll_ms ? "更新于 " + fmtTime(s.last_poll_ms) : "尚未更新";
+
+  const t = d.ticker;
+  const bars = d.bars || [];
+  const last = t ? t.last : (bars.length ? bars[bars.length - 1].close : null);
+  document.getElementById("lastPrice").textContent = fmtPrice(last);
+
+  const chg = document.getElementById("priceChange");
+  chg.textContent = "";
+  chg.className = "stat-foot num";
+  if (t && t.open_24h) {
+    const pct = (t.last / t.open_24h - 1) * 100;
+    const pill = document.createElement("span");
+    pill.className = "delta " + (pct >= 0 ? "up" : "down");
+    // The arrow carries the sign as well as the color, so direction survives
+    // for readers who cannot separate the two hues.
+    pill.textContent = `${pct >= 0 ? "▲" : "▼"} ${Math.abs(pct).toFixed(2)}%`;
+    chg.append(pill, document.createTextNode(" 24 小时"));
+  } else {
+    chg.textContent = "24 小时 —";
+  }
+
+  // A sparkline of the same closes the main chart shows, so the headline price
+  // carries its own recent shape without a second full chart.
+  const sparkHost = document.getElementById("heroSpark");
+  sparkHost.textContent = "";
+  if (bars.length > 2) {
+    const closes = bars.map(b => b.close);
+    const rising = closes[closes.length - 1] >= closes[0];
+    sparkHost.appendChild(sparkline(closes, {
+      color: rising ? cssVar("--good") : cssVar("--critical"),
+      height: 34,
+    }));
+  }
+
+  const full = (d.live || {}).full;
+  const nextEl = document.getElementById("nextPred");
+  const deltaEl = document.getElementById("nextPredDelta");
+  if (full && full.points.length && last != null) {
+    const p = full.points[0].median;
+    nextEl.textContent = fmtPrice(p);
+    const diff = p - full.origin_close;
+    deltaEl.textContent = "";
+    deltaEl.className = "stat-foot num";
+    const pill = document.createElement("span");
+    pill.className = "delta " + (diff >= 0 ? "up" : "down");
+    pill.textContent = `${diff >= 0 ? "▲" : "▼"} ${Math.abs(diff).toFixed(2)}`;
+    deltaEl.append(pill, document.createTextNode(" 相对起点 USDT"));
+  } else {
+    nextEl.textContent = "—";
+    deltaEl.textContent = "等待第一次预测";
+    deltaEl.className = "stat-foot num";
+  }
+
+  const metrics = d.metrics || [];
+  const scored = metrics.reduce((a, m) => a + m.overall.n, 0);
+  document.getElementById("scoredN").textContent = String(scored);
+  document.getElementById("pendingN").textContent =
+    "待结算 " + metrics.reduce((a, m) => a + m.pending, 0);
+  const ranked = metrics.filter(m => m.overall.mae != null)
+                        .sort((a, b) => a.overall.mae - b.overall.mae);
+  const bestEl = document.getElementById("bestConfig");
+  bestEl.textContent = "";
+  if (ranked.length) {
+    const sw = document.createElement("span");
+    sw.className = "swatch";
+    sw.style.background = colorOf(ranked[0].config_id);
+    bestEl.append(sw, document.createTextNode(ranked[0].name_zh));
+  } else {
+    bestEl.textContent = "—";
+  }
+  document.getElementById("bestConfigMae").textContent = ranked.length
+    ? `MAE ${ranked[0].overall.mae.toFixed(3)} · 相对持平基线 ${fmtNum(ranked[0].overall.skill, 3)}`
+    : "样本不足";
+}
+
+/** Charts are an enhancement: a failure in one must not take the page down.
+ *  Every value a chart shows is also in a table below it, so the numeric views
+ *  are rendered unconditionally. */
+function guarded(name, fn) {
+  try { fn(); } catch (err) { console.error(name + " failed:", err); }
+}
+
+function render() {
+  if (!state.data) return;
+  guarded("header", renderHeader);
+  if (window.LightweightCharts) {
+    guarded("liveChart", renderLive);
+    guarded("trackChart", renderTrack);
+    guarded("maeChart", renderMae);
+  } else {
+    renderChartsUnavailable();
+    guarded("maeTable", renderStepTable);
+  }
+  guarded("metricTable", renderMetricTable);
+  guarded("channels", renderChannels);
+  guarded("log", renderLog);
+  const leads = leadChoices();
+  document.querySelectorAll("#leadSeg button").forEach((b, i) =>
+    b.setAttribute("aria-pressed", String(leads[i] && leads[i][0] === state.lead)));
+  document.querySelectorAll("#rangeSeg button").forEach((b, i) =>
+    b.setAttribute("aria-pressed", String(RANGE_CHOICES[i][0] === state.rangeBars)));
+  document.querySelectorAll("#bandSeg button").forEach((b, i) =>
+    b.setAttribute("aria-pressed", String(configs()[i] && configs()[i].id === state.bandConfig)));
+}
+
+function renderChartsUnavailable() {
+  for (const [boxId, legendId] of [["liveChart", "liveLegend"],
+                                   ["trackChart", "trackLegend"],
+                                   ["maeChart", "maeLegend"]]) {
+    const plot = document.getElementById(boxId);
+    if (plot && plot.parentNode) plot.parentNode.style.display = "none";
+    const legend = document.getElementById(legendId);
+    if (!legend) continue;
+    legend.textContent = "";
+    const msg = document.createElement("div");
+    msg.className = "item static";
+    msg.textContent = "图表库未加载，下方表格仍是完整数据。";
+    legend.appendChild(msg);
+  }
+}
+
+let inflight = false;
+async function refresh() {
+  if (inflight) return;
+  inflight = true;
+  try {
+    const res = await fetch(`/api/state?bars=${state.rangeBars}&lead=${state.lead}`);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const previousHorizon = state.data && state.data.definition.horizon_bars;
+    state.data = await res.json();
+    if (state.data.lead && state.data.lead !== state.lead) state.lead = state.data.lead;
+    if (previousHorizon !== state.data.definition.horizon_bars) buildSegments();
+    render();
+  } catch (err) {
+    const box = document.getElementById("errorAlert");
+    box.hidden = false;
+    box.textContent = "无法连接后端：" + err.message;
+  } finally {
+    inflight = false;
+  }
+}
+
+refresh();
+setInterval(refresh, 15000);
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+  if (window.LightweightCharts) repaintCharts();
+  render();
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+# Realtime ZEC-USDT forecasting dashboard.
+#
+# TimesFM 3.0 itself comes from the repository root (`pip install -e '.[torch]'`
+# from the repo root, or `pip install timesfm[torch]`); these are the extras this
+# app adds on top.
+fastapi>=0.110
+uvicorn[standard]>=0.27
+httpx>=0.27
+numpy>=1.26.4
