@@ -26,9 +26,39 @@ python -m zecfm            # http://127.0.0.1:8000
 的数值都能在下方表格里读到——浅色模式下绿色对比度低于 3:1，靠的就是这两层兜底。
 图表悬停有十字准星和一次列出所有系列的浮层；深色下的网格线只比背景高一档，不跟数据线抢。
 
-图表库 Chart.js 是**本地打包**的，页面没有任何第三方 CDN 依赖；即使图表完全没加载出来，
-表格和通道面板也照常渲染。窄屏（手机）下 hero 区堆叠为单列，宽表格在自己的容器里横向
-滚动，页面本身不会横向溢出。
+### 图表
+
+价格图用的是 TradingView 官方开源的
+**[Lightweight Charts](https://github.com/tradingview/lightweight-charts)**（Apache-2.0），
+而不是通用图表库 —— 真实的红绿 K 线、磁吸十字准星、右侧价格轴上的最后值徽章、
+时间轴刻度，都来自画 tradingview.com 的同一套代码，所以图表读起来就是交易员习惯的样子。
+
+三张图的分工：
+
+| 图 | 用的组件 | 说明 |
+|---|---|---|
+| 实时预测 | `createChart` + `CandlestickSeries` | 真实 K 线 + 三条预测虚线 |
+| 提前 N 分钟 vs 真实 | `createChart` + `LineSeries` | 真实线 vs 三条预测线 |
+| 误差随提前量 | `createOptionsChart` | 横轴是提前量不是时钟，所以用库自带的**数值横轴**图，而不是把时间轴硬掰成别的东西 |
+
+两处需要说明的实现细节：
+
+- **q10–q90 置信带**是一个**自定义系列**（`addCustomSeries`），在两条分位数边界之间填一条
+  路径。没有用「叠两层 area、下层刷成背景色」这个常见技巧，因为那样填充并不真的透明 ——
+  网格线会被盖掉，q10 以下的内容也会被糊住。
+- **每条预测线的直接标注**（A / B / C）不是手画上去的，而是 series 的 `title` 选项 ——
+  它会出现在价格轴的最后值徽章里，这正是 TradingView 自己的做法。浅色模式下绿色对比度
+  低于 3:1，靠的就是这个标注加下方表格兜底。
+- 图表**只创建一次**，之后每次轮询只 `setData`。每 15 秒重建一遍会把读者的缩放和平移
+  全部丢掉，而那恰恰是可交互价格图的意义所在。
+- 横轴单位：数值横轴会自己格式化刻度、不走 `tickMarkFormatter`，所以「误差随提前量」那张
+  图的横轴是裸数字，单位写在图例里。
+
+图表库是**本地打包**的（`static/vendor/`），页面没有任何第三方 CDN 依赖；即使图表完全
+没加载出来，表格和通道面板也照常渲染。窄屏（手机）下 hero 区堆叠为单列，宽表格在自己的
+容器里横向滚动，页面本身不会横向溢出。
+
+TradingView 的归属 logo 保留在图表左下角。
 
 ---
 
@@ -196,7 +226,8 @@ zecfm/
   store.py        SQLite 持久化与打分
   service.py      轮询 → 预测 → 结算 循环
   app.py          FastAPI
-static/index.html 单页仪表盘（Chart.js）
+static/index.html 单页仪表盘（TradingView Lightweight Charts）
+static/vendor/     本地打包的 lightweight-charts（Apache-2.0）
 tests/            50 个单元测试，不需要网络和权重
 ```
 

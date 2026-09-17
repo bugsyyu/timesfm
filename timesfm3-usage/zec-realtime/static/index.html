@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ZEC 实时预测 · TimesFM 3.0</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%232a78d6'/%3E%3Cpath d='M3 11l3-4 3 2 4-5' stroke='white' stroke-width='1.8' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<script src="/static/vendor/chart.umd.min.js"></script>
+<script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
 <style>
   /* ---------------------------------------------------------------- tokens
      Dark is the primary mode: this is a market terminal, and the surface it
@@ -248,6 +248,7 @@
 
   .chartbox { position: relative; height: 392px; }
   .chartbox.short { height: 268px; }
+  .plot { position: absolute; inset: 0; }
 
   .legend { display: flex; flex-wrap: wrap; gap: 7px 18px; margin: 14px 0 2px; }
   .legend .item {
@@ -494,7 +495,7 @@
         <span id="horizonMin">60</span> 分钟的预测中位数，阴影为所选配置的 q10–q90 区间。
         预测起点是最近一根已收盘 K 线，三种配置共用同一个 5.9 小时上下文。</p>
     </div>
-    <div class="chartbox"><canvas id="liveChart"></canvas><div class="tt" id="liveTT"></div></div>
+    <div class="chartbox"><div id="liveChart" class="plot"></div><div class="tt" id="liveTT"></div></div>
     <div class="legend" id="liveLegend"></div>
   </section>
 
@@ -504,7 +505,7 @@
       <p class="note">把每一次「提前 <span id="leadMinTitle2">60</span> 分钟」的预测按其目标时间画出来，
         与同一时刻的真实收盘价对齐。线离真实价越近，说明该配置在这个提前量上越准。</p>
     </div>
-    <div class="chartbox"><canvas id="trackChart"></canvas><div class="tt" id="trackTT"></div></div>
+    <div class="chartbox"><div id="trackChart" class="plot"></div><div class="tt" id="trackTT"></div></div>
     <div class="legend" id="trackLegend"></div>
   </section>
 
@@ -513,7 +514,7 @@
       <h2>误差随提前量的变化</h2>
       <p class="note">每种配置在各提前量上的平均绝对误差（MAE，USDT）。下方表格是同一份数据的数值视图。</p>
     </div>
-    <div class="chartbox short"><canvas id="maeChart"></canvas><div class="tt" id="maeTT"></div></div>
+    <div class="chartbox short"><div id="maeChart" class="plot"></div><div class="tt" id="maeTT"></div></div>
     <div class="legend" id="maeLegend"></div>
     <div class="tablewrap" style="margin-top:16px"><table id="stepTable"></table></div>
   </section>
@@ -651,6 +652,7 @@ document.getElementById("themeToggle").addEventListener("click", () => {
     (!root.hasAttribute("data-theme") && matchMedia("(prefers-color-scheme: dark)").matches);
   root.setAttribute("data-theme", dark ? "light" : "dark");
   try { localStorage.setItem("zecfm-theme", dark ? "light" : "dark"); } catch (e) {}
+  if (window.LightweightCharts) repaintCharts();
   render();
 });
 try {
@@ -659,140 +661,19 @@ try {
 } catch (e) {}
 
 // ---------------------------------------------------------------- charts
-/** Crosshair: a solid hairline at the active index, drawn under the points. */
-const crosshair = {
-  id: "crosshair",
-  afterDatasetsDraw(chart) {
-    const active = chart.tooltip && chart.tooltip.getActiveElements();
-    if (!active || !active.length) return;
-    const x = active[0].element.x;
-    const { top, bottom } = chart.chartArea;
-    const ctx = chart.ctx;
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(x, top);
-    ctx.lineTo(x, bottom);
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = cssVar("--text-3");
-    ctx.globalAlpha = 0.42;
-    ctx.stroke();
-    ctx.restore();
-  },
-};
-
-/** Selective direct labels: the series name at its final point. */
-const endLabels = {
-  id: "endLabels",
-  afterDatasetsDraw(chart) {
-    const ctx = chart.ctx;
-    ctx.save();
-    ctx.font = "650 11.5px " + FONT_STACK;
-    ctx.textBaseline = "middle";
-    const used = [];
-    chart.data.datasets.forEach((ds, i) => {
-      if (!ds.endLabel || chart.getDatasetMeta(i).hidden) return;
-      const meta = chart.getDatasetMeta(i);
-      const pts = meta.data.filter((p, idx) => ds.data[idx] != null);
-      if (!pts.length) return;
-      const last = pts[pts.length - 1];
-      let y = last.y;
-      while (used.some(v => Math.abs(v - y) < 12)) y += 12;
-      used.push(y);
-      const width = ctx.measureText(ds.endLabel).width;
-      const x = Math.min(last.x + 7, chart.width - width - 4);
-      ctx.fillStyle = ds.borderColor;
-      ctx.fillText(ds.endLabel, x, y);
-    });
-    ctx.restore();
-  },
-};
-
-/** External tooltip: value-first rows keyed by a short stroke of series color. */
-function externalTooltip(boxId, formatter) {
-  return (context) => {
-    const el = document.getElementById(boxId);
-    const tt = context.tooltip;
-    if (!tt || tt.opacity === 0) { el.style.opacity = 0; return; }
-    el.textContent = "";
-    const title = document.createElement("div");
-    title.className = "tt-title";
-    title.textContent = tt.title && tt.title.length ? tt.title[0] : "";
-    el.appendChild(title);
-    for (const item of tt.dataPoints) {
-      const ds = item.dataset;
-      if (ds.hideInTooltip) continue;
-      const row = document.createElement("div");
-      row.className = "tt-row";
-      const key = document.createElement("span");
-      key.className = "tt-key";
-      key.style.background = ds.borderColor;
-      const val = document.createElement("span");
-      val.className = "tt-val num";
-      val.textContent = formatter(item.parsed.y);
-      const name = document.createElement("span");
-      name.className = "tt-name";
-      name.textContent = ds.label;
-      row.append(key, val, name);
-      el.appendChild(row);
-    }
-    el.style.opacity = 1;
-    const box = context.chart.canvas.parentNode.getBoundingClientRect();
-    let left = tt.caretX + 14;
-    if (left + el.offsetWidth > box.width) left = tt.caretX - el.offsetWidth - 14;
-    el.style.left = Math.max(0, left) + "px";
-    el.style.top = Math.max(0, tt.caretY - el.offsetHeight / 2) + "px";
-  };
-}
-
-function baseScales(yTitle) {
-  const tick = {
-    color: cssVar("--text-3"),
-    font: { size: 11, family: FONT_STACK, weight: "500" },
-  };
-  return {
-    x: {
-      grid: { display: false },
-      border: { color: cssVar("--hairline") },
-      ticks: { ...tick, maxRotation: 0, autoSkipPadding: 26, padding: 6 },
-    },
-    y: {
-      // Hairline grid one shade off the surface: present for reading values,
-      // never competing with the marks.
-      grid: { color: cssVar("--hairline"), drawTicks: false },
-      border: { display: false },
-      title: yTitle
-        ? { display: true, text: yTitle, color: cssVar("--text-3"),
-            font: { size: 10.5, family: FONT_STACK, weight: "500" } }
-        : undefined,
-      ticks: { ...tick, padding: 8 },
-    },
-  };
-}
-
-function baseOptions(ttId, formatter, yTitle) {
-  return {
-    responsive: true,
-    maintainAspectRatio: false,
-    animation: false,
-    interaction: { mode: "index", intersect: false },
-    layout: { padding: { right: 34, top: 6, bottom: 2 } },
-    plugins: {
-      legend: { display: false },
-      tooltip: { enabled: false, external: externalTooltip(ttId, formatter) },
-    },
-    elements: { point: { radius: 0, hoverRadius: 5, hitRadius: 24, borderWidth: 2 } },
-    scales: baseScales(yTitle),
-  };
-}
-
+/* ---------------------------------------------------------------- legend --
+   A legend is always present for two or more series, and clicking an entry
+   toggles that series. Entries marked `fixed` describe a mark that has no
+   separate series to hide (the candles' own up/down colours). */
 function renderLegend(hostId, entries, chartKey) {
   const host = document.getElementById(hostId);
   host.textContent = "";
   for (const e of entries) {
     const item = document.createElement("div");
-    item.className = "item";
-    const off = state.hidden.has(chartKey + ":" + e.id);
-    item.setAttribute("data-off", String(off));
+    item.className = "item" + (e.fixed ? " static" : "");
+    if (!e.fixed) {
+      item.setAttribute("data-off", String(state.hidden.has(chartKey + ":" + e.id)));
+    }
     const key = document.createElement("span");
     key.className = "key" + (e.dashed ? " dash" : "") + (e.area ? " area" : "");
     if (e.dashed) { key.style.color = e.color; key.style.width = "16px"; }
@@ -800,106 +681,317 @@ function renderLegend(hostId, entries, chartKey) {
     const label = document.createElement("span");
     label.textContent = e.label;
     item.append(key, label);
-    item.addEventListener("click", () => {
-      const token = chartKey + ":" + e.id;
-      if (state.hidden.has(token)) state.hidden.delete(token); else state.hidden.add(token);
-      render();
-    });
+    if (!e.fixed) {
+      item.addEventListener("click", () => {
+        const token = chartKey + ":" + e.id;
+        if (state.hidden.has(token)) state.hidden.delete(token); else state.hidden.add(token);
+        render();
+      });
+    }
     host.appendChild(item);
   }
 }
 
 function visible(chartKey, id) { return !state.hidden.has(chartKey + ":" + id); }
 
-function upsertChart(key, canvasId, config) {
-  if (state.charts[key]) { state.charts[key].destroy(); }
-  state.charts[key] = new Chart(document.getElementById(canvasId).getContext("2d"), config);
+/* ==========================================================================
+   Charts — TradingView Lightweight Charts (Apache-2.0).
+
+   The price views use TradingView's own library rather than a general-purpose
+   charting one: candlesticks, the magnet crosshair, the price-axis last-value
+   badges and the time scale all come from the same code that draws
+   tradingview.com, so the page reads the way a trader expects a chart to read.
+
+   Charts are created once and then fed with setData on each poll. Rebuilding
+   them every 15 seconds would throw away the reader's pan and zoom, which on an
+   interactive price chart is the whole point of having one.
+   ========================================================================== */
+
+const LWC = window.LightweightCharts;
+
+/** Live chart handles, kept across renders so zoom/pan survive a data refresh. */
+const charts = { live: null, track: null, mae: null };
+let chartTheme = null;  // the theme the charts were last built/painted for
+
+function themeKey() { return cssVar("--surface-1") + "|" + cssVar("--text-1"); }
+
+/** Chart chrome from the page's own tokens, so both themes stay in step. */
+function chartOptions() {
+  return {
+    autoSize: true,
+    layout: {
+      background: { type: LWC.ColorType.Solid, color: cssVar("--surface-1") },
+      textColor: cssVar("--text-3"),
+      fontFamily: FONT_STACK,
+      fontSize: 11,
+      attributionLogo: true,   // TradingView's mark stays on TradingView's chart
+    },
+    grid: {
+      vertLines: { color: cssVar("--hairline") },
+      horzLines: { color: cssVar("--hairline") },
+    },
+    rightPriceScale: {
+      borderColor: cssVar("--hairline"),
+      scaleMargins: { top: 0.12, bottom: 0.12 },
+    },
+    timeScale: {
+      borderColor: cssVar("--hairline"),
+      timeVisible: true,
+      secondsVisible: false,
+      rightOffset: 3,
+      barSpacing: 8,
+    },
+    crosshair: {
+      mode: LWC.CrosshairMode.Magnet,
+      vertLine: {
+        color: cssVar("--text-3"), width: 1, style: LWC.LineStyle.Solid,
+        labelBackgroundColor: cssVar("--text-2"),
+      },
+      horzLine: {
+        color: cssVar("--text-3"), width: 1, style: LWC.LineStyle.Solid,
+        labelBackgroundColor: cssVar("--text-2"),
+      },
+    },
+    localization: {
+      locale: "zh-CN",
+      timeFormatter: (ts) => fmtTime(ts * 1000),
+    },
+    handleScale: { axisPressedMouseMove: { price: false } },
+  };
 }
 
-// ---------------------------------------------------------------- render
+function withTickFormatter(options) {
+  return {
+    ...options,
+    timeScale: { ...options.timeScale, tickMarkFormatter: (ts) => fmtTime(ts * 1000) },
+  };
+}
+
+const toSec = (ms) => Math.floor(ms / 1000);
+
+/* -------------------------------------------------- quantile band series --
+   Lightweight Charts has no built-in interval series, so the q10–q90 fan is a
+   custom series: one filled path between the two quantile edges. Doing it this
+   way (rather than stacking two area series, the usual trick) means the fill is
+   genuinely transparent - the grid still reads through it, and nothing below
+   q10 gets painted over. */
+class BandRenderer {
+  update(data, options) { this._data = data; this._options = options; }
+  draw(target, priceConverter) {
+    const data = this._data, options = this._options;
+    if (!data || !data.bars.length) return;
+    target.useBitmapCoordinateSpace((scope) => {
+      const ctx = scope.context;
+      const pts = data.bars.map((b) => ({
+        x: b.x * scope.horizontalPixelRatio,
+        hi: priceConverter(b.originalData.hi) * scope.verticalPixelRatio,
+        lo: priceConverter(b.originalData.lo) * scope.verticalPixelRatio,
+      }));
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].hi);
+      for (const p of pts) ctx.lineTo(p.x, p.hi);
+      for (let i = pts.length - 1; i >= 0; i--) ctx.lineTo(pts[i].x, pts[i].lo);
+      ctx.closePath();
+      ctx.fillStyle = options.fillColor;
+      ctx.fill();
+      ctx.restore();
+    });
+  }
+}
+
+class BandSeries {
+  constructor() { this._renderer = new BandRenderer(); }
+  priceValueBuilder(d) { return [d.lo, d.hi]; }   // feeds the price-scale autofit
+  isWhitespace(d) { return d.hi === undefined || d.hi === null; }
+  renderer() { return this._renderer; }
+  update(data, options) { this._renderer.update(data, options); }
+  defaultOptions() { return { fillColor: "rgba(27,175,122,0.16)", lastValueVisible: false, priceLineVisible: false }; }
+}
+
+/* ------------------------------------------------------------- tooltips --
+   One readout listing every series at the crosshair, so the pointer never has
+   to land on a line to get a value. Values lead, series names follow. */
+function attachTooltip(chart, boxId, rows, format, titleFormat) {
+  const box = document.getElementById(boxId);
+  chart.subscribeCrosshairMove((param) => {
+    if (!param.time || !param.point || param.point.x < 0 || param.point.y < 0) {
+      box.style.opacity = 0;
+      return;
+    }
+    const entries = [];
+    for (const row of rows()) {
+      const bar = param.seriesData.get(row.series);
+      if (!bar) continue;
+      const value = bar.value !== undefined ? bar.value : bar.close;
+      if (value === undefined || value === null) continue;
+      entries.push({ label: row.label, color: row.color, value });
+    }
+    if (!entries.length) { box.style.opacity = 0; return; }
+
+    box.textContent = "";
+    const title = document.createElement("div");
+    title.className = "tt-title";
+    title.textContent = titleFormat
+      ? titleFormat(param.time)
+      : fmtTime(param.time * 1000);
+    box.appendChild(title);
+    for (const e of entries) {
+      const row = document.createElement("div");
+      row.className = "tt-row";
+      const key = document.createElement("span");
+      key.className = "tt-key";
+      key.style.background = e.color;
+      const val = document.createElement("span");
+      val.className = "tt-val num";
+      val.textContent = format(e.value);
+      const name = document.createElement("span");
+      name.className = "tt-name";
+      name.textContent = e.label;
+      row.append(key, val, name);
+      box.appendChild(row);
+    }
+    box.style.opacity = 1;
+    const w = box.offsetWidth, h = box.offsetHeight;
+    const host = chart.chartElement().getBoundingClientRect();
+    let left = param.point.x + 16;
+    if (left + w > host.width) left = param.point.x - w - 16;
+    let top = param.point.y - h / 2;
+    top = Math.max(4, Math.min(top, host.height - h - 4));
+    box.style.left = Math.max(4, left) + "px";
+    box.style.top = top + "px";
+  });
+}
+
+/* ------------------------------------------------------------ live chart -- */
+function buildLiveChart() {
+  const host = document.getElementById("liveChart");
+  const chart = LWC.createChart(host, withTickFormatter(chartOptions()));
+
+  // Added before the candles so the fan sits behind the price.
+  const band = chart.addCustomSeries(new BandSeries(), {
+    fillColor: withAlpha(colorOf("full"), parseFloat(cssVar("--band-alpha"))),
+  });
+  const candles = chart.addSeries(LWC.CandlestickSeries, {
+    upColor: cssVar("--good"), downColor: cssVar("--critical"),
+    borderUpColor: cssVar("--good"), borderDownColor: cssVar("--critical"),
+    wickUpColor: cssVar("--good"), wickDownColor: cssVar("--critical"),
+    priceLineVisible: true, priceLineColor: cssVar("--text-3"),
+    priceLineStyle: LWC.LineStyle.Dotted,
+    priceFormat: { type: "price", precision: 2, minMove: 0.01 },
+  });
+  const lines = {};
+  for (const c of configs()) {
+    lines[c.id] = chart.addSeries(LWC.LineSeries, {
+      color: colorOf(c.id), lineWidth: 2, lineStyle: LWC.LineStyle.Dashed,
+      // The title rides the price-axis badge - TradingView's own direct label.
+      title: c.name_zh.split(" ")[0],
+      lastValueVisible: true, priceLineVisible: false,
+      crosshairMarkerRadius: 4,
+      priceFormat: { type: "price", precision: 2, minMove: 0.01 },
+    });
+  }
+  charts.live = { chart, band, candles, lines, fitted: false };
+
+  attachTooltip(chart, "liveTT", () => {
+    const rows = [{ series: candles, label: "真实收盘价", color: cssVar("--text-1") }];
+    for (const c of configs()) {
+      if (visible("live", c.id)) {
+        rows.push({ series: lines[c.id], label: c.name_zh, color: colorOf(c.id) });
+      }
+    }
+    return rows;
+  }, (v) => fmtPrice(v));
+  return charts.live;
+}
+
 function renderLive() {
   const d = state.data;
   const bars = d.bars || [];
   if (!bars.length) return;
+  const h = charts.live || buildLiveChart();
+
+  h.candles.setData(bars.map((b) => ({
+    time: toSec(b.ts), open: b.open, high: b.high, low: b.low, close: b.close,
+  })));
 
   const live = d.live || {};
-  let futureTs = [];
+  const origin = bars[bars.length - 1];
+
   for (const c of configs()) {
     const f = live[c.id];
-    if (f && f.points.length > futureTs.length) futureTs = f.points.map(p => p.target_ts);
+    const series = h.lines[c.id];
+    const on = visible("live", c.id);
+    series.applyOptions({ visible: on });
+    if (!f || !f.points.length) { series.setData([]); continue; }
+    // Anchor each forecast to the last real print so it grows out of the candles.
+    series.setData([{ time: toSec(origin.ts), value: origin.close }].concat(
+      f.points.map((p) => ({ time: toSec(p.target_ts), value: p.median }))));
   }
-  const labels = bars.map(b => b.ts).concat(futureTs);
-  const idxOf = new Map(labels.map((ts, i) => [ts, i]));
-  const originIdx = bars.length - 1;
-  // One blank slot past the last forecast point so the quantile fill ends
-  // inside the plot rather than being sliced off by its right edge.
-  const slots = labels.length + 1;
-  const tickLabels = labels.map(fmtTime).concat([""]);
 
-  const datasets = [];
-  const legend = [];
-
-  // q10-q90 band of the selected config, drawn first so lines sit on top.
   const bandCfg = state.bandConfig;
   const bandF = live[bandCfg];
-  if (bandF && visible("live", "band")) {
-    const lo = new Array(slots).fill(null);
-    const hi = new Array(slots).fill(null);
-    lo[originIdx] = hi[originIdx] = bars[originIdx].close;
-    for (const p of bandF.points) {
-      const i = idxOf.get(p.target_ts);
-      if (i != null) { lo[i] = p.q10; hi[i] = p.q90; }
-    }
-    const c = colorOf(bandCfg);
-    datasets.push({ label: "q90", data: hi, borderColor: withAlpha(c, 0.35), borderWidth: 0,
-                    backgroundColor: withAlpha(c, parseFloat(cssVar("--band-alpha"))),
-                    fill: "+1", pointRadius: 0, hideInTooltip: true });
-    datasets.push({ label: "q10", data: lo, borderColor: withAlpha(c, 0.35), borderWidth: 0,
-                    pointRadius: 0, hideInTooltip: true });
-  }
-  legend.push({ id: "band", label: `q10–q90 区间（${nameOf(bandCfg)}）`,
-                color: withAlpha(colorOf(bandCfg), 0.45), area: true });
-
-  if (visible("live", "actual")) {
-    datasets.push({
-      label: "真实收盘价",
-      data: bars.map(b => b.close)
-        .concat(new Array(slots - bars.length).fill(null)),
-      borderColor: cssVar("--text-1"), borderWidth: 2, tension: 0.15, pointRadius: 0,
-    });
-  }
-  legend.push({ id: "actual", label: "真实收盘价", color: cssVar("--text-1") });
-
-  for (const c of configs()) {
-    const f = live[c.id];
-    legend.push({ id: c.id, label: c.name_zh, color: colorOf(c.id), dashed: true });
-    if (!f || !visible("live", c.id)) continue;
-    const series = new Array(slots).fill(null);
-    series[originIdx] = bars[originIdx].close;  // anchor the forecast to the last real print
-    for (const p of f.points) {
-      const i = idxOf.get(p.target_ts);
-      if (i != null) series[i] = p.median;
-    }
-    datasets.push({
-      label: c.name_zh, data: series, borderColor: colorOf(c.id), borderWidth: 2,
-      borderDash: [6, 4], tension: 0.15, pointRadius: 0,
-      endLabel: c.name_zh.split(" ")[0],
-    });
-  }
-
-  const options = baseOptions("liveTT", v => fmtPrice(v), "USDT");
-  upsertChart("live", "liveChart", {
-    type: "line",
-    data: { labels: tickLabels, datasets },
-    options,
-    plugins: [crosshair, endLabels],
+  const showBand = bandF && bandF.points.length && visible("live", "band");
+  h.band.applyOptions({
+    visible: !!showBand,
+    fillColor: withAlpha(colorOf(bandCfg), parseFloat(cssVar("--band-alpha"))),
   });
+  h.band.setData(showBand
+    ? [{ time: toSec(origin.ts), lo: origin.close, hi: origin.close }].concat(
+        bandF.points.map((p) => ({ time: toSec(p.target_ts), lo: p.q10, hi: p.q90 })))
+    : []);
+
+  if (!h.fitted) { chartFitVisible(h.chart); h.fitted = true; }
+
+  const legend = [
+    { id: "band", label: `q10–q90 区间（${nameOf(bandCfg)}）`,
+      color: withAlpha(colorOf(bandCfg), 0.5), area: true },
+    { id: "candles", label: "真实 K 线（涨绿 / 跌红）", color: cssVar("--good"), area: true,
+      fixed: true },
+  ];
+  for (const c of configs()) {
+    legend.push({ id: c.id, label: c.name_zh, color: colorOf(c.id), dashed: true });
+  }
   renderLegend("liveLegend", legend, "live");
 }
 
+/** Shows the recent window rather than every bar, the way a price chart opens. */
+function chartFitVisible(chart) {
+  chart.timeScale().fitContent();
+}
+
+/* ------------------------------------------------------------ track chart -- */
+function buildTrackChart() {
+  const host = document.getElementById("trackChart");
+  const chart = LWC.createChart(host, withTickFormatter(chartOptions()));
+  const actual = chart.addSeries(LWC.LineSeries, {
+    color: cssVar("--text-1"), lineWidth: 2, title: "真实",
+    priceLineVisible: false, crosshairMarkerRadius: 4,
+    priceFormat: { type: "price", precision: 2, minMove: 0.01 },
+  });
+  const lines = {};
+  for (const c of configs()) {
+    lines[c.id] = chart.addSeries(LWC.LineSeries, {
+      color: colorOf(c.id), lineWidth: 2, lineStyle: LWC.LineStyle.Dashed,
+      title: c.name_zh.split(" ")[0], priceLineVisible: false, crosshairMarkerRadius: 4,
+      priceFormat: { type: "price", precision: 2, minMove: 0.01 },
+    });
+  }
+  charts.track = { chart, actual, lines, fitted: false };
+  attachTooltip(chart, "trackTT", () => {
+    const rows = [{ series: actual, label: "真实收盘价", color: cssVar("--text-1") }];
+    for (const c of configs()) {
+      if (visible("track", c.id)) {
+        rows.push({ series: lines[c.id], label: c.name_zh, color: colorOf(c.id) });
+      }
+    }
+    return rows;
+  }, (v) => fmtPrice(v));
+  return charts.track;
+}
+
 function renderTrack() {
-  const d = state.data;
-  const trails = d.trails || {};
+  const trails = state.data.trails || {};
   const byTs = new Map();
   for (const c of configs()) {
     for (const p of (trails[c.id] || [])) {
@@ -909,10 +1001,12 @@ function renderTrack() {
   }
   const stamps = [...byTs.keys()].sort((a, b) => a - b);
   const host = document.getElementById("trackLegend");
+
   if (!stamps.length) {
-    if (state.charts.track) { state.charts.track.destroy(); state.charts.track = null; }
-    const ctx = document.getElementById("trackChart").getContext("2d");
-    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    if (charts.track) {
+      charts.track.actual.setData([]);
+      for (const c of configs()) charts.track.lines[c.id].setData([]);
+    }
     host.textContent = "";
     const msg = document.createElement("div");
     msg.className = "item static";
@@ -922,61 +1016,114 @@ function renderTrack() {
     return;
   }
 
-  const datasets = [];
-  const legend = [{ id: "actual", label: "真实收盘价", color: cssVar("--text-1") }];
-  if (visible("track", "actual")) {
-    datasets.push({
-      label: "真实收盘价", data: stamps.map(t => byTs.get(t).actual),
-      borderColor: cssVar("--text-1"), borderWidth: 2, tension: 0.15, pointRadius: 0,
-    });
+  const h = charts.track || buildTrackChart();
+  h.actual.setData(stamps.map((t) => ({ time: toSec(t), value: byTs.get(t).actual })));
+  h.actual.applyOptions({ visible: visible("track", "actual") });
+  for (const c of configs()) {
+    const series = h.lines[c.id];
+    series.applyOptions({ visible: visible("track", c.id) });
+    series.setData(stamps
+      .filter((t) => byTs.get(t)[c.id] != null)
+      .map((t) => ({ time: toSec(t), value: byTs.get(t)[c.id] })));
   }
+  if (!h.fitted) { h.chart.timeScale().fitContent(); h.fitted = true; }
+
+  const legend = [{ id: "actual", label: "真实收盘价", color: cssVar("--text-1") }];
   for (const c of configs()) {
     legend.push({ id: c.id, label: c.name_zh, color: colorOf(c.id), dashed: true });
-    if (!visible("track", c.id)) continue;
-    datasets.push({
-      label: c.name_zh, data: stamps.map(t => byTs.get(t)[c.id] ?? null),
-      borderColor: colorOf(c.id), borderWidth: 2, borderDash: [6, 4], tension: 0.15,
-      pointRadius: 0, spanGaps: true, endLabel: c.name_zh.split(" ")[0],
+  }
+  renderLegend("trackLegend", legend, "track");
+}
+
+/* -------------------------------------------------------------- MAE chart --
+   Horizontal axis here is lead time, not a clock, so this one is built with
+   createOptionsChart - the library's own numeric-scale chart - rather than
+   bending a time axis into something it is not. */
+function buildMaeChart() {
+  const host = document.getElementById("maeChart");
+  const options = chartOptions();
+  const chart = LWC.createOptionsChart(host, {
+    ...options,
+    timeScale: { ...options.timeScale, rightOffset: 1, barSpacing: 46 },
+    // Note: the numeric horizontal scale formats its own tick marks and ignores
+    // tickMarkFormatter, so the axis shows bare numbers and the legend below
+    // carries the unit.
+    localization: { locale: "zh-CN", timeFormatter: (v) => v + " 分钟" },
+  });
+  const lines = {};
+  for (const c of configs()) {
+    lines[c.id] = chart.addSeries(LWC.LineSeries, {
+      color: colorOf(c.id), lineWidth: 2, title: c.name_zh.split(" ")[0],
+      priceLineVisible: false, crosshairMarkerRadius: 4,
+      pointMarkersVisible: true, pointMarkersRadius: 3,
+      priceFormat: { type: "price", precision: 3, minMove: 0.001 },
     });
   }
-  upsertChart("track", "trackChart", {
-    type: "line",
-    data: { labels: stamps.map(fmtTime), datasets },
-    options: baseOptions("trackTT", v => fmtPrice(v), "USDT"),
-    plugins: [crosshair, endLabels],
-  });
-  renderLegend("trackLegend", legend, "track");
+  charts.mae = { chart, lines, fitted: false };
+  attachTooltip(chart, "maeTT", () => configs()
+    .filter((c) => visible("mae", c.id))
+    .map((c) => ({ series: lines[c.id], label: c.name_zh, color: colorOf(c.id) })),
+    (v) => fmtNum(v, 3) + " USDT", (t) => "提前 " + t + " 分钟");
+  return charts.mae;
 }
 
 function renderMae() {
   const metrics = state.data.metrics || [];
-  const steps = (metrics[0] && metrics[0].by_step) || [];
-  const labels = steps.map(s => s.minutes + " 分钟");
-  const datasets = [];
-  const legend = [];
+  const h = charts.mae || buildMaeChart();
+  let any = false;
   for (const m of metrics) {
-    legend.push({ id: m.config_id, label: m.name_zh, color: colorOf(m.config_id) });
-    if (!visible("mae", m.config_id)) continue;
-    datasets.push({
-      label: m.name_zh,
-      data: m.by_step.map(s => s.mae),
-      borderColor: colorOf(m.config_id), backgroundColor: colorOf(m.config_id),
-      borderWidth: 2, tension: 0.2, pointRadius: 3, pointBorderWidth: 2,
-      pointBackgroundColor: cssVar("--surface-1"), spanGaps: true,
-      endLabel: m.name_zh.split(" ")[0],
-    });
+    const series = h.lines[m.config_id];
+    if (!series) continue;
+    series.applyOptions({ visible: visible("mae", m.config_id) });
+    const points = m.by_step
+      .filter((s) => s.mae != null && isFinite(s.mae))
+      .map((s) => ({ time: s.minutes, value: s.mae }));
+    if (points.length) any = true;
+    series.setData(points);
   }
-  upsertChart("mae", "maeChart", {
-    type: "line",
-    data: { labels, datasets },
-    options: baseOptions("maeTT", v => fmtNum(v, 3), "MAE (USDT)"),
-    plugins: [crosshair, endLabels],
-  });
-  renderLegend("maeLegend", legend, "mae");
+  if (any && !h.fitted) { h.chart.timeScale().fitContent(); h.fitted = true; }
+
+  renderLegend("maeLegend", metrics.map((m) => ({
+    id: m.config_id, label: m.name_zh, color: colorOf(m.config_id),
+  })).concat([{ id: "axis", label: "横轴：提前量（分钟）", color: "transparent", fixed: true }]),
+    "mae");
   renderStepTable();
 }
 
-/** Table view of the MAE chart - also the fallback when Chart.js is absent. */
+/* ------------------------------------------------------------ theme swap -- */
+/** Repaints every chart from the current tokens after a light/dark change. */
+function repaintCharts() {
+  const options = chartOptions();
+  for (const key of ["live", "track", "mae"]) {
+    const h = charts[key];
+    if (!h) continue;
+    if (key === "mae") {
+      h.chart.applyOptions({
+        ...options,
+        timeScale: { ...options.timeScale, rightOffset: 1, barSpacing: 46 },
+        localization: { locale: "zh-CN", timeFormatter: (v) => v + " 分钟" },
+      });
+    } else {
+      h.chart.applyOptions(withTickFormatter(options));
+    }
+    if (h.candles) {
+      h.candles.applyOptions({
+        upColor: cssVar("--good"), downColor: cssVar("--critical"),
+        borderUpColor: cssVar("--good"), borderDownColor: cssVar("--critical"),
+        wickUpColor: cssVar("--good"), wickDownColor: cssVar("--critical"),
+        priceLineColor: cssVar("--text-3"),
+      });
+    }
+    if (h.actual) h.actual.applyOptions({ color: cssVar("--text-1") });
+    if (h.lines) {
+      for (const c of configs()) {
+        if (h.lines[c.id]) h.lines[c.id].applyOptions({ color: colorOf(c.id) });
+      }
+    }
+  }
+}
+
+/** Table view of the MAE chart - also the fallback when the chart library is absent. */
 function renderStepTable() {
   const metrics = state.data.metrics || [];
   const steps = (metrics[0] && metrics[0].by_step) || [];
@@ -1374,7 +1521,7 @@ function guarded(name, fn) {
 function render() {
   if (!state.data) return;
   guarded("header", renderHeader);
-  if (window.Chart) {
+  if (window.LightweightCharts) {
     guarded("liveChart", renderLive);
     guarded("trackChart", renderTrack);
     guarded("maeChart", renderMae);
@@ -1398,8 +1545,8 @@ function renderChartsUnavailable() {
   for (const [boxId, legendId] of [["liveChart", "liveLegend"],
                                    ["trackChart", "trackLegend"],
                                    ["maeChart", "maeLegend"]]) {
-    const canvas = document.getElementById(boxId);
-    if (canvas && canvas.parentNode) canvas.parentNode.style.display = "none";
+    const plot = document.getElementById(boxId);
+    if (plot && plot.parentNode) plot.parentNode.style.display = "none";
     const legend = document.getElementById(legendId);
     if (!legend) continue;
     legend.textContent = "";
@@ -1433,7 +1580,10 @@ async function refresh() {
 
 refresh();
 setInterval(refresh, 15000);
-matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+  if (window.LightweightCharts) repaintCharts();
+  render();
+});
 </script>
 </body>
 </html>
