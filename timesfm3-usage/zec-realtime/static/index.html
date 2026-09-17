@@ -249,6 +249,29 @@
   .chartbox { position: relative; height: 392px; }
   .chartbox.short { height: 268px; }
   .plot { position: absolute; inset: 0; }
+  /* Cold start is the first thing a new reader sees, so an empty chart says
+     what it is waiting for instead of leaving a blank 392px hole. */
+  .plot-empty {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    padding: 0 28px; text-align: center; line-height: 1.8;
+    color: var(--text-3); font-size: 13px;
+  }
+  .plot-empty[hidden] { display: none; }
+  /* Exchange-style OHLC readout pinned over the top-left of the plot. It
+     tracks the crosshair and falls back to the newest bar. */
+  .ohlc {
+    position: absolute; left: 10px; top: 6px; z-index: 5;
+    display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline;
+    font-size: 11.5px; color: var(--text-2); pointer-events: none;
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+  .ohlc .pair { font-weight: 600; color: var(--text-1); font-size: 12px; margin-right: 2px; }
+  .ohlc .f { display: inline-flex; gap: 4px; }
+  .ohlc .f b { font-weight: 600; }
+  .ohlc .k { color: var(--text-3); font-weight: 500; }
+  .ohlc .up b, .ohlc .up { color: var(--good); }
+  .ohlc .down b, .ohlc .down { color: var(--critical); }
+  @media (max-width: 640px) { .ohlc { font-size: 10.5px; gap: 2px 8px; } }
 
   .legend { display: flex; flex-wrap: wrap; gap: 7px 18px; margin: 14px 0 2px; }
   .legend .item {
@@ -495,7 +518,11 @@
         <span id="horizonMin">60</span> 分钟的预测中位数，阴影为所选配置的 q10–q90 区间。
         预测起点是最近一根已收盘 K 线，三种配置共用同一个 5.9 小时上下文。</p>
     </div>
-    <div class="chartbox"><div id="liveChart" class="plot"></div><div class="tt" id="liveTT"></div></div>
+    <div class="chartbox">
+      <div id="liveChart" class="plot"></div>
+      <div class="ohlc" id="liveOHLC"></div>
+      <div class="tt" id="liveTT"></div>
+    </div>
     <div class="legend" id="liveLegend"></div>
   </section>
 
@@ -863,7 +890,90 @@ function attachTooltip(chart, boxId, rows, format, titleFormat) {
   });
 }
 
+/** Swaps a plot for a centred message, or back. */
+function setPlotEmpty(plotId, message) {
+  const host = document.getElementById(plotId);
+  if (!host) return;
+  const box = host.parentNode;
+  let note = box.querySelector(".plot-empty");
+  if (message) {
+    if (!note) {
+      note = document.createElement("div");
+      note.className = "plot-empty";
+      box.appendChild(note);
+    }
+    note.textContent = message;
+    note.hidden = false;
+    host.style.visibility = "hidden";
+  } else {
+    if (note) note.hidden = true;
+    host.style.visibility = "";
+  }
+}
+
 /* ------------------------------------------------------------ live chart -- */
+
+/** Formats turnover the way an exchange does: 1.2M rather than 1204312.44. */
+function fmtVolume(v) {
+  if (v == null || !isFinite(v)) return "—";
+  const abs = Math.abs(v);
+  if (abs >= 1e9) return (v / 1e9).toFixed(2) + "B";
+  if (abs >= 1e6) return (v / 1e6).toFixed(2) + "M";
+  if (abs >= 1e3) return (v / 1e3).toFixed(1) + "K";
+  return v.toFixed(0);
+}
+
+/** Paints the O/H/L/C strip over the plot. */
+function paintOhlc(bar, volumeValue) {
+  const host = document.getElementById("liveOHLC");
+  if (!host) return;
+  host.textContent = "";
+  if (!bar || bar.open === undefined) return;
+
+  const up = bar.close >= bar.open;
+  const cls = up ? "up" : "down";
+  const pct = bar.open ? (bar.close / bar.open - 1) * 100 : 0;
+
+  const pair = document.createElement("span");
+  pair.className = "pair";
+  const status = state.data && state.data.status;
+  pair.textContent = (status ? status.inst_id : "ZEC-USDT-SWAP")
+    + " · " + (status ? status.bar : "5m");
+  host.appendChild(pair);
+
+  for (const [key, value] of [["开", bar.open], ["高", bar.high],
+                              ["低", bar.low], ["收", bar.close]]) {
+    const f = document.createElement("span");
+    f.className = "f " + cls;
+    const k = document.createElement("span");
+    k.className = "k";
+    k.textContent = key;
+    const b = document.createElement("b");
+    b.textContent = fmtPrice(value);
+    f.append(k, b);
+    host.appendChild(f);
+  }
+
+  const change = document.createElement("span");
+  change.className = "f " + cls;
+  const cb = document.createElement("b");
+  cb.textContent = (pct >= 0 ? "+" : "") + pct.toFixed(2) + "%";
+  change.appendChild(cb);
+  host.appendChild(change);
+
+  if (volumeValue != null) {
+    const vol = document.createElement("span");
+    vol.className = "f";
+    const k = document.createElement("span");
+    k.className = "k";
+    k.textContent = "成交额";
+    const b = document.createElement("b");
+    b.textContent = fmtVolume(volumeValue);
+    vol.append(k, b);
+    host.appendChild(vol);
+  }
+}
+
 function buildLiveChart() {
   const host = document.getElementById("liveChart");
   const chart = LWC.createChart(host, withTickFormatter(chartOptions()));
@@ -880,6 +990,15 @@ function buildLiveChart() {
     priceLineStyle: LWC.LineStyle.Dotted,
     priceFormat: { type: "price", precision: 2, minMove: 0.01 },
   });
+  // Turnover sits on its own overlay scale in the bottom quarter, so it reads
+  // under the price without sharing - or distorting - the price axis.
+  const volume = chart.addSeries(LWC.HistogramSeries, {
+    priceFormat: { type: "volume" },
+    priceScaleId: "volume",
+    lastValueVisible: false, priceLineVisible: false,
+  });
+  volume.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+  chart.priceScale("right").applyOptions({ scaleMargins: { top: 0.08, bottom: 0.26 } });
   const lines = {};
   for (const c of configs()) {
     lines[c.id] = chart.addSeries(LWC.LineSeries, {
@@ -891,7 +1010,15 @@ function buildLiveChart() {
       priceFormat: { type: "price", precision: 2, minMove: 0.01 },
     });
   }
-  charts.live = { chart, band, candles, lines, fitted: false };
+  charts.live = { chart, band, candles, volume, lines, fitted: false };
+
+  // The readout follows the crosshair and falls back to the newest bar, which
+  // is what an exchange chart does when the pointer leaves the plot.
+  chart.subscribeCrosshairMove((param) => {
+    const bar = param.time ? param.seriesData.get(candles) : null;
+    const vol = param.time ? param.seriesData.get(volume) : null;
+    paintOhlc(bar, vol ? vol.value : null);
+  });
 
   attachTooltip(chart, "liveTT", () => {
     const rows = [{ series: candles, label: "真实收盘价", color: cssVar("--text-1") }];
@@ -914,6 +1041,11 @@ function renderLive() {
   h.candles.setData(bars.map((b) => ({
     time: toSec(b.ts), open: b.open, high: b.high, low: b.low, close: b.close,
   })));
+  h.volume.setData(bars.map((b) => ({
+    time: toSec(b.ts), value: b.volume_quote,
+    color: withAlpha(b.close >= b.open ? cssVar("--good") : cssVar("--critical"), 0.4),
+  })));
+  paintOhlc(bars[bars.length - 1], bars[bars.length - 1].volume_quote);
 
   const live = d.live || {};
   const origin = bars[bars.length - 1];
@@ -1007,14 +1139,13 @@ function renderTrack() {
       charts.track.actual.setData([]);
       for (const c of configs()) charts.track.lines[c.id].setData([]);
     }
+    setPlotEmpty("trackChart",
+      `还没有提前 ${leadMinutes()} 分钟的预测完成结算 ——`
+      + `服务再运行 ${leadMinutes()} 分钟，这里就会开始逐点累积。`);
     host.textContent = "";
-    const msg = document.createElement("div");
-    msg.className = "item static";
-    msg.textContent = `还没有提前 ${leadMinutes()} 分钟的预测完成结算，`
-      + `服务运行 ${leadMinutes()} 分钟后这里会开始出现数据。`;
-    host.appendChild(msg);
     return;
   }
+  setPlotEmpty("trackChart", null);
 
   const h = charts.track || buildTrackChart();
   h.actual.setData(stamps.map((t) => ({ time: toSec(t), value: byTs.get(t).actual })));
@@ -1069,18 +1200,35 @@ function buildMaeChart() {
 
 function renderMae() {
   const metrics = state.data.metrics || [];
+  const series = metrics.map((m) => m.by_step
+    .filter((s) => s.mae != null && isFinite(s.mae))
+    .map((s) => ({ time: s.minutes, value: s.mae })));
+  // One resolved lead time draws a flat line across the plot, which reads as a
+  // result rather than as "not enough data yet". Wait for a second point.
+  const longest = series.reduce((n, pts) => Math.max(n, pts.length), 0);
+
+  if (longest < 2) {
+    if (charts.mae) {
+      for (const c of configs()) charts.mae.lines[c.id].setData([]);
+    }
+    setPlotEmpty("maeChart", longest === 0
+      ? "还没有预测完成结算 —— 第一根 5 分钟 K 线收盘后，这里会开始出现曲线。"
+      : "目前只有一个提前量结算完成，画不出误差曲线；再等几根 K 线。");
+    document.getElementById("maeLegend").textContent = "";
+    renderStepTable();
+    return;
+  }
+  setPlotEmpty("maeChart", null);
+
   const h = charts.mae || buildMaeChart();
   let any = false;
-  for (const m of metrics) {
-    const series = h.lines[m.config_id];
-    if (!series) continue;
-    series.applyOptions({ visible: visible("mae", m.config_id) });
-    const points = m.by_step
-      .filter((s) => s.mae != null && isFinite(s.mae))
-      .map((s) => ({ time: s.minutes, value: s.mae }));
-    if (points.length) any = true;
-    series.setData(points);
-  }
+  metrics.forEach((m, i) => {
+    const line = h.lines[m.config_id];
+    if (!line) return;
+    line.applyOptions({ visible: visible("mae", m.config_id) });
+    if (series[i].length) any = true;
+    line.setData(series[i]);
+  });
   if (any && !h.fitted) { h.chart.timeScale().fitContent(); h.fitted = true; }
 
   renderLegend("maeLegend", metrics.map((m) => ({
@@ -1113,6 +1261,13 @@ function repaintCharts() {
         wickUpColor: cssVar("--good"), wickDownColor: cssVar("--critical"),
         priceLineColor: cssVar("--text-3"),
       });
+    }
+    if (h.volume && state.data) {
+      const bars = state.data.bars || [];
+      h.volume.setData(bars.map((b) => ({
+        time: toSec(b.ts), value: b.volume_quote,
+        color: withAlpha(b.close >= b.open ? cssVar("--good") : cssVar("--critical"), 0.4),
+      })));
     }
     if (h.actual) h.actual.applyOptions({ color: cssVar("--text-1") });
     if (h.lines) {
