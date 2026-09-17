@@ -1,0 +1,1054 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ZEC 实时预测 · TimesFM 3.0</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%232a78d6'/%3E%3Cpath d='M3 11l3-4 3 2 4-5' stroke='white' stroke-width='1.8' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<script src="/static/vendor/chart.umd.min.js"></script>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-0:      #f4f4f2;
+    --surface-1:      #fcfcfb;
+    --surface-2:      #f0efec;
+    --hairline:       #e3e2de;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #85847e;
+    --series-1:       #2a78d6;  /* config A - price only  */
+    --series-2:       #eb6834;  /* config B - technicals  */
+    --series-3:       #1baf7a;  /* config C - all 13      */
+    --good:           #026e3f;
+    --critical:       #b32d2c;
+    --band-alpha:     0.13;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface-0:      #121211;
+      --surface-1:      #1a1a19;
+      --surface-2:      #232322;
+      --hairline:       #34343180;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #8f8e85;
+      --series-1:       #3987e5;
+      --series-2:       #d95926;
+      --series-3:       #199e70;
+      --good:           #4ab87d;
+      --critical:       #e66767;
+      --band-alpha:     0.17;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-0:      #121211;
+    --surface-1:      #1a1a19;
+    --surface-2:      #232322;
+    --hairline:       #34343180;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #8f8e85;
+    --series-1:       #3987e5;
+    --series-2:       #d95926;
+    --series-3:       #199e70;
+    --good:           #4ab87d;
+    --critical:       #e66767;
+    --band-alpha:     0.17;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--surface-0);
+    color: var(--text-primary);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Hiragino Sans GB", "Microsoft YaHei", Roboto, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 24px 16px 64px; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* --- header --- */
+  header.top { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: baseline;
+               justify-content: space-between; margin-bottom: 20px; }
+  h1 { font-size: 20px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
+  h1 .sub { font-weight: 400; color: var(--text-secondary); font-size: 14px; margin-left: 10px; }
+  .badges { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .badge { font-size: 12px; padding: 3px 9px; border-radius: 999px;
+           border: 1px solid var(--hairline); background: var(--surface-1);
+           color: var(--text-secondary); white-space: nowrap; }
+  .badge.live { color: var(--good); }
+  .badge.warn { color: var(--critical); border-color: var(--critical); }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+         background: var(--good); margin-right: 6px; vertical-align: middle; }
+  .dot.stale { background: var(--critical); }
+
+  .alert { border: 1px solid var(--critical); background: var(--surface-1);
+           color: var(--critical); border-radius: 10px; padding: 12px 14px;
+           margin-bottom: 18px; font-size: 13px; }
+  .alert[hidden] { display: none; }
+
+  /* --- stat tiles --- */
+  .tiles { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+           margin-bottom: 18px; }
+  .tile { background: var(--surface-1); border: 1px solid var(--hairline);
+          border-radius: 12px; padding: 14px 16px; }
+  .tile .label { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+  .tile .value { font-size: 26px; font-weight: 620; letter-spacing: -0.02em; }
+  .tile .foot { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+  .up { color: var(--good); } .down { color: var(--critical); }
+
+  /* --- filters --- */
+  .filters { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center;
+             margin-bottom: 18px; }
+  .fgroup { display: flex; align-items: center; gap: 8px; }
+  .fgroup > span { font-size: 12px; color: var(--text-muted); }
+  .seg { display: inline-flex; border: 1px solid var(--hairline); border-radius: 8px;
+         overflow: hidden; background: var(--surface-1); }
+  .seg button { border: 0; background: transparent; color: var(--text-secondary);
+                font: inherit; font-size: 13px; padding: 5px 11px; cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--hairline); }
+  .seg button[aria-pressed="true"] { background: var(--surface-2); color: var(--text-primary);
+                                     font-weight: 600; }
+  .seg button:hover { background: var(--surface-2); }
+
+  /* --- cards & charts --- */
+  .card { background: var(--surface-1); border: 1px solid var(--hairline);
+          border-radius: 12px; padding: 18px 18px 14px; margin-bottom: 18px; }
+  .card h2 { font-size: 15px; font-weight: 620; margin: 0 0 3px; }
+  .card .note { font-size: 12.5px; color: var(--text-secondary); margin: 0 0 14px; }
+  .chartbox { position: relative; height: 380px; }
+  .chartbox.short { height: 260px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 12px 0 2px; }
+  .legend .item { display: flex; align-items: center; gap: 7px; font-size: 12.5px;
+                  color: var(--text-secondary); cursor: pointer; user-select: none; }
+  .legend .item[data-off="true"] { opacity: 0.4; }
+  .legend .key { width: 16px; height: 2px; border-radius: 1px; flex: none; }
+  .legend .key.dash { height: 0; border-top: 2px dashed currentColor; }
+  .legend .key.area { height: 11px; border-radius: 2px; }
+
+  /* --- tooltip --- */
+  .tt { position: absolute; pointer-events: none; opacity: 0; transition: opacity .12s;
+        background: var(--surface-1); border: 1px solid var(--hairline);
+        border-radius: 9px; padding: 9px 11px; font-size: 12.5px; min-width: 150px;
+        box-shadow: 0 6px 22px rgba(0,0,0,.14); z-index: 20; }
+  .tt .tt-title { color: var(--text-muted); font-size: 11.5px; margin-bottom: 6px; }
+  .tt .tt-row { display: flex; align-items: center; gap: 8px; margin-top: 3px; }
+  .tt .tt-key { width: 14px; height: 2px; border-radius: 1px; flex: none; }
+  .tt .tt-val { font-weight: 640; color: var(--text-primary); min-width: 62px;
+                text-align: right; }
+  .tt .tt-name { color: var(--text-secondary); }
+
+  /* --- tables --- */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--hairline); }
+  th:first-child, td:first-child { text-align: left; }
+  thead th { font-size: 12px; font-weight: 600; color: var(--text-muted);
+             border-bottom: 1px solid var(--hairline); white-space: nowrap; }
+  tbody tr:last-child td { border-bottom: 0; }
+  td .swatch { display: inline-block; width: 14px; height: 2px; border-radius: 1px;
+               margin-right: 8px; vertical-align: middle; }
+  .best { font-weight: 660; color: var(--good); }
+  .tablewrap { overflow-x: auto; }
+
+  /* --- channel panel --- */
+  .grouphead { font-size: 12px; color: var(--text-muted); text-transform: uppercase;
+               letter-spacing: .06em; margin: 6px 0 10px; }
+  .chgrid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(178px, 1fr));
+            margin-bottom: 18px; }
+  .ch { border: 1px solid var(--hairline); border-radius: 10px; padding: 11px 12px;
+        background: var(--surface-1); }
+  .ch .name { font-size: 12.5px; font-weight: 600; display: flex; justify-content: space-between;
+              gap: 6px; align-items: baseline; }
+  .ch .en { font-weight: 400; color: var(--text-muted); font-size: 11px; }
+  .ch .val { font-size: 19px; font-weight: 620; letter-spacing: -0.01em; margin-top: 2px; }
+  .ch .unit { font-size: 11.5px; color: var(--text-muted); font-weight: 400; margin-left: 4px; }
+  .ch svg { display: block; width: 100%; height: 34px; margin-top: 4px; overflow: visible; }
+  .ch .meta { font-size: 11px; color: var(--text-muted); margin-top: 4px;
+              display: flex; justify-content: space-between; gap: 6px; }
+  .empty { color: var(--text-muted); font-size: 13px; padding: 26px 0; text-align: center; }
+
+  footer { font-size: 12px; color: var(--text-muted); line-height: 1.7;
+           border-top: 1px solid var(--hairline); padding-top: 16px; margin-top: 8px; }
+  footer code { background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
+  @media (max-width: 640px) {
+    .chartbox { height: 300px; }
+    .tile .value { font-size: 22px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <h1>ZEC-USDT 实时预测<span class="sub" id="instSub">ZEC-USDT-SWAP · 5 分钟 K 线</span></h1>
+    <div class="badges">
+      <span class="badge" id="engineBadge">engine —</span>
+      <span class="badge" id="ctxBadge">上下文 —</span>
+      <span class="badge live" id="statusBadge"><span class="dot"></span>连接中…</span>
+      <button class="badge" id="themeToggle" type="button" style="cursor:pointer">切换主题</button>
+    </div>
+  </header>
+
+  <div class="alert" id="engineAlert" hidden></div>
+  <div class="alert" id="errorAlert" hidden></div>
+
+  <section class="tiles">
+    <div class="tile">
+      <div class="label">最新成交价</div>
+      <div class="value num" id="lastPrice">—</div>
+      <div class="foot num" id="priceChange">24 小时 —</div>
+    </div>
+    <div class="tile">
+      <div class="label">下一根 K 线预测（C · 全通道）</div>
+      <div class="value num" id="nextPred">—</div>
+      <div class="foot num" id="nextPredDelta">相对当前 —</div>
+    </div>
+    <div class="tile">
+      <div class="label">已评分样本</div>
+      <div class="value num" id="scoredN">—</div>
+      <div class="foot num" id="pendingN">待结算 —</div>
+    </div>
+    <div class="tile">
+      <div class="label">当前最优配置（MAE）</div>
+      <div class="value" id="bestConfig" style="font-size:19px">—</div>
+      <div class="foot num" id="bestConfigMae">—</div>
+    </div>
+  </section>
+
+  <div class="filters">
+    <div class="fgroup">
+      <span>预测提前量</span>
+      <div class="seg" id="leadSeg"></div>
+    </div>
+    <div class="fgroup">
+      <span>历史范围</span>
+      <div class="seg" id="rangeSeg"></div>
+    </div>
+    <div class="fgroup">
+      <span>置信带</span>
+      <div class="seg" id="bandSeg"></div>
+    </div>
+    <div class="fgroup" style="margin-left:auto">
+      <span class="num" id="updatedAt">—</span>
+    </div>
+  </div>
+
+  <section class="card">
+    <h2>实时预测</h2>
+    <p class="note">黑色实线为已收盘的真实价格；三条虚线是三种配置对未来
+      <span id="horizonMin">60</span> 分钟的预测中位数，阴影为所选配置的 q10–q90 区间。
+      预测起点为最近一根已收盘 K 线，全部三种配置共用同一个 5.9 小时上下文。</p>
+    <div class="chartbox"><canvas id="liveChart"></canvas><div class="tt" id="liveTT"></div></div>
+    <div class="legend" id="liveLegend"></div>
+  </section>
+
+  <section class="card">
+    <h2>提前 <span id="leadMinTitle">60</span> 分钟的预测 vs 真实</h2>
+    <p class="note">把每一次「提前 <span id="leadMinTitle2">60</span> 分钟」的预测按其目标时间画出来，
+      与同一时刻真实收盘价对齐。线离黑线越近，说明该配置在这个提前量上越准。</p>
+    <div class="chartbox"><canvas id="trackChart"></canvas><div class="tt" id="trackTT"></div></div>
+    <div class="legend" id="trackLegend"></div>
+  </section>
+
+  <section class="card">
+    <h2>误差随提前量的变化</h2>
+    <p class="note">每种配置在各提前量上的平均绝对误差（MAE，美元）。下方表格是同一份数据的数值视图。</p>
+    <div class="chartbox short"><canvas id="maeChart"></canvas><div class="tt" id="maeTT"></div></div>
+    <div class="legend" id="maeLegend"></div>
+    <div class="tablewrap" style="margin-top:14px"><table id="stepTable"></table></div>
+  </section>
+
+  <section class="card">
+    <h2>准确度对比</h2>
+    <p class="note">仅统计已经有真实 K 线落地的预测点。<b>相对持平基线</b> = 模型 MAE ÷
+      「价格不动」基线 MAE，小于 1 才说明模型真的赢过了随机游走。</p>
+    <div class="tablewrap"><table id="metricTable"></table></div>
+  </section>
+
+  <section class="card">
+    <h2>13 个协变量通道</h2>
+    <p class="note">全部对齐到同一条 5 分钟网格，窗口长度 <span id="ctxNote">71 根 / 355 分钟</span>。
+      「实测」为该通道在窗口内真正被观测到（而非前值填充）的比例。</p>
+    <div id="channelPanel"><div class="empty">等待第一次预测…</div></div>
+  </section>
+
+  <section class="card">
+    <h2>最近已结算的预测</h2>
+    <p class="note">提前量 <span id="leadMinTitle3">60</span> 分钟，按目标时间倒序。</p>
+    <div class="tablewrap"><table id="logTable"></table></div>
+  </section>
+
+  <footer>
+    <div>数据源：OKX 公共行情与衍生品统计接口（<code>/api/v5/market/candles</code>、
+      <code>/rubik/stat/taker-volume</code>、<code>/rubik/stat/contracts/long-short-account-ratio</code>、
+      <code>/rubik/stat/margin/loan-ratio</code>、<code>/rubik/stat/contracts/open-interest-volume</code>、
+      <code>/public/funding-rate</code>）。四个 rubik 接口按币种聚合，描述的是全市场 ZEC 合约而非单一合约。</div>
+    <div>上下文固定为 5.9 小时，因为主动买卖量比接口只保留 72 个 5 分钟桶，其中最新一个尚未收敛。</div>
+    <div>本页面仅用于模型评估与演示，不构成任何投资建议。</div>
+  </footer>
+</div>
+
+<script>
+"use strict";
+
+// ---------------------------------------------------------------- state
+const state = {
+  lead: 12,
+  rangeBars: 96,
+  bandConfig: "full",
+  data: null,
+  charts: {},
+  hidden: new Set(),
+};
+
+const RANGE_CHOICES = [[48, "4 小时"], [96, "8 小时"], [288, "24 小时"]];
+
+/** Lead-time presets, derived from the horizon the server actually runs so the
+ *  selected chip always matches the data behind it. */
+function minutesPerBar() {
+  const s = state.data && state.data.status;
+  return s && s.horizon_bars ? s.horizon_minutes / s.horizon_bars : 5;
+}
+function leadMinutes() { return Math.round(state.lead * minutesPerBar()); }
+
+function leadChoices() {
+  const horizon = (state.data && state.data.definition.horizon_bars) || 12;
+  const perBar = minutesPerBar();
+  const candidates = [1, 3, 6, 12, 24, 36].filter(b => b <= horizon);
+  if (!candidates.includes(horizon)) candidates.push(horizon);
+  return candidates.map(b => [b, Math.round(b * perBar) + " 分钟"]);
+}
+
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+function seriesColor(i) { return cssVar("--series-" + (i + 1)); }
+function withAlpha(hex, alpha) {
+  const h = hex.replace("#", "");
+  const n = parseInt(h.length === 3 ? h.split("").map(c => c + c).join("") : h, 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
+function fmtTime(ms) {
+  const d = new Date(ms);
+  return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+}
+function fmtPrice(v, digits = 2) {
+  return v == null || !isFinite(v) ? "—" : v.toLocaleString("en-US",
+    { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+function fmtNum(v, digits = 2, suffix = "") {
+  return v == null || !isFinite(v) ? "—" : v.toFixed(digits) + suffix;
+}
+/** Config metadata by id, in the fixed order that owns the categorical slots. */
+function configs() { return (state.data && state.data.definition.configs) || []; }
+function colorOf(id) {
+  const i = configs().findIndex(c => c.id === id);
+  return seriesColor(i < 0 ? 0 : i);
+}
+function nameOf(id) {
+  const c = configs().find(x => x.id === id);
+  return c ? c.name_zh : id;
+}
+
+// ---------------------------------------------------------------- chrome
+function buildSegments() {
+  const mk = (host, choices, current, onPick) => {
+    host.textContent = "";
+    for (const [value, label] of choices) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = label;
+      b.setAttribute("aria-pressed", String(value === current));
+      b.addEventListener("click", () => onPick(value));
+      host.appendChild(b);
+    }
+  };
+  const leads = leadChoices();
+  if (!leads.some(([v]) => v === state.lead)) state.lead = leads[leads.length - 1][0];
+  mk(document.getElementById("leadSeg"), leads, state.lead, v => {
+    state.lead = v; refresh();
+  });
+  mk(document.getElementById("rangeSeg"), RANGE_CHOICES, state.rangeBars, v => {
+    state.rangeBars = v; refresh();
+  });
+  const bandChoices = configs().map(c => [c.id, c.name_zh.split(" ")[0]]);
+  mk(document.getElementById("bandSeg"), bandChoices.length ? bandChoices : [["full", "C"]],
+     state.bandConfig, v => { state.bandConfig = v; render(); });
+}
+
+document.getElementById("themeToggle").addEventListener("click", () => {
+  const root = document.documentElement;
+  const dark = root.getAttribute("data-theme") === "dark" ||
+    (!root.hasAttribute("data-theme") && matchMedia("(prefers-color-scheme: dark)").matches);
+  root.setAttribute("data-theme", dark ? "light" : "dark");
+  try { localStorage.setItem("zecfm-theme", dark ? "light" : "dark"); } catch (e) {}
+  render();
+});
+try {
+  const saved = localStorage.getItem("zecfm-theme");
+  if (saved) document.documentElement.setAttribute("data-theme", saved);
+} catch (e) {}
+
+// ---------------------------------------------------------------- charts
+/** Crosshair: a solid hairline at the active index, drawn under the points. */
+const crosshair = {
+  id: "crosshair",
+  afterDatasetsDraw(chart) {
+    const active = chart.tooltip && chart.tooltip.getActiveElements();
+    if (!active || !active.length) return;
+    const x = active[0].element.x;
+    const { top, bottom } = chart.chartArea;
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(x, top);
+    ctx.lineTo(x, bottom);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = cssVar("--text-muted");
+    ctx.globalAlpha = 0.55;
+    ctx.stroke();
+    ctx.restore();
+  },
+};
+
+/** Selective direct labels: the series name at its final point. */
+const endLabels = {
+  id: "endLabels",
+  afterDatasetsDraw(chart) {
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.font = "600 11px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+    ctx.textBaseline = "middle";
+    const used = [];
+    chart.data.datasets.forEach((ds, i) => {
+      if (!ds.endLabel || chart.getDatasetMeta(i).hidden) return;
+      const meta = chart.getDatasetMeta(i);
+      const pts = meta.data.filter((p, idx) => ds.data[idx] != null);
+      if (!pts.length) return;
+      const last = pts[pts.length - 1];
+      let y = last.y;
+      while (used.some(v => Math.abs(v - y) < 12)) y += 12;
+      used.push(y);
+      const width = ctx.measureText(ds.endLabel).width;
+      const x = Math.min(last.x + 7, chart.width - width - 4);
+      ctx.fillStyle = ds.borderColor;
+      ctx.fillText(ds.endLabel, x, y);
+    });
+    ctx.restore();
+  },
+};
+
+/** External tooltip: value-first rows keyed by a short stroke of series color. */
+function externalTooltip(boxId, formatter) {
+  return (context) => {
+    const el = document.getElementById(boxId);
+    const tt = context.tooltip;
+    if (!tt || tt.opacity === 0) { el.style.opacity = 0; return; }
+    el.textContent = "";
+    const title = document.createElement("div");
+    title.className = "tt-title";
+    title.textContent = tt.title && tt.title.length ? tt.title[0] : "";
+    el.appendChild(title);
+    for (const item of tt.dataPoints) {
+      const ds = item.dataset;
+      if (ds.hideInTooltip) continue;
+      const row = document.createElement("div");
+      row.className = "tt-row";
+      const key = document.createElement("span");
+      key.className = "tt-key";
+      key.style.background = ds.borderColor;
+      const val = document.createElement("span");
+      val.className = "tt-val num";
+      val.textContent = formatter(item.parsed.y);
+      const name = document.createElement("span");
+      name.className = "tt-name";
+      name.textContent = ds.label;
+      row.append(key, val, name);
+      el.appendChild(row);
+    }
+    el.style.opacity = 1;
+    const box = context.chart.canvas.parentNode.getBoundingClientRect();
+    let left = tt.caretX + 14;
+    if (left + el.offsetWidth > box.width) left = tt.caretX - el.offsetWidth - 14;
+    el.style.left = Math.max(0, left) + "px";
+    el.style.top = Math.max(0, tt.caretY - el.offsetHeight / 2) + "px";
+  };
+}
+
+function baseScales(yTitle) {
+  const grid = { color: cssVar("--hairline"), drawTicks: false, borderDash: undefined };
+  return {
+    x: {
+      grid: { display: false },
+      border: { color: cssVar("--hairline") },
+      ticks: { color: cssVar("--text-muted"), maxRotation: 0, autoSkipPadding: 22, font: { size: 11 } },
+    },
+    y: {
+      grid,
+      border: { display: false },
+      title: yTitle ? { display: true, text: yTitle, color: cssVar("--text-muted"), font: { size: 11 } } : undefined,
+      ticks: { color: cssVar("--text-muted"), font: { size: 11 }, padding: 6 },
+    },
+  };
+}
+
+function baseOptions(ttId, formatter, yTitle) {
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
+    interaction: { mode: "index", intersect: false },
+    layout: { padding: { right: 34, top: 6, bottom: 2 } },
+    plugins: {
+      legend: { display: false },
+      tooltip: { enabled: false, external: externalTooltip(ttId, formatter) },
+    },
+    elements: { point: { radius: 0, hoverRadius: 5, hitRadius: 24, borderWidth: 2 } },
+    scales: baseScales(yTitle),
+  };
+}
+
+function renderLegend(hostId, entries, chartKey) {
+  const host = document.getElementById(hostId);
+  host.textContent = "";
+  for (const e of entries) {
+    const item = document.createElement("div");
+    item.className = "item";
+    const off = state.hidden.has(chartKey + ":" + e.id);
+    item.setAttribute("data-off", String(off));
+    const key = document.createElement("span");
+    key.className = "key" + (e.dashed ? " dash" : "") + (e.area ? " area" : "");
+    if (e.dashed) { key.style.color = e.color; key.style.width = "16px"; }
+    else key.style.background = e.color;
+    const label = document.createElement("span");
+    label.textContent = e.label;
+    item.append(key, label);
+    item.addEventListener("click", () => {
+      const token = chartKey + ":" + e.id;
+      if (state.hidden.has(token)) state.hidden.delete(token); else state.hidden.add(token);
+      render();
+    });
+    host.appendChild(item);
+  }
+}
+
+function visible(chartKey, id) { return !state.hidden.has(chartKey + ":" + id); }
+
+function upsertChart(key, canvasId, config) {
+  if (state.charts[key]) { state.charts[key].destroy(); }
+  state.charts[key] = new Chart(document.getElementById(canvasId).getContext("2d"), config);
+}
+
+// ---------------------------------------------------------------- render
+function renderLive() {
+  const d = state.data;
+  const bars = d.bars || [];
+  if (!bars.length) return;
+
+  const live = d.live || {};
+  let futureTs = [];
+  for (const c of configs()) {
+    const f = live[c.id];
+    if (f && f.points.length > futureTs.length) futureTs = f.points.map(p => p.target_ts);
+  }
+  const labels = bars.map(b => b.ts).concat(futureTs);
+  const idxOf = new Map(labels.map((ts, i) => [ts, i]));
+  const originIdx = bars.length - 1;
+
+  const datasets = [];
+  const legend = [];
+
+  // q10-q90 band of the selected config, drawn first so lines sit on top.
+  const bandCfg = state.bandConfig;
+  const bandF = live[bandCfg];
+  if (bandF && visible("live", "band")) {
+    const lo = new Array(labels.length).fill(null);
+    const hi = new Array(labels.length).fill(null);
+    lo[originIdx] = hi[originIdx] = bars[originIdx].close;
+    for (const p of bandF.points) {
+      const i = idxOf.get(p.target_ts);
+      if (i != null) { lo[i] = p.q10; hi[i] = p.q90; }
+    }
+    const c = colorOf(bandCfg);
+    datasets.push({ label: "q90", data: hi, borderColor: withAlpha(c, 0.35), borderWidth: 0,
+                    backgroundColor: withAlpha(c, parseFloat(cssVar("--band-alpha"))),
+                    fill: "+1", pointRadius: 0, hideInTooltip: true });
+    datasets.push({ label: "q10", data: lo, borderColor: withAlpha(c, 0.35), borderWidth: 0,
+                    pointRadius: 0, hideInTooltip: true });
+  }
+  legend.push({ id: "band", label: `q10–q90 区间（${nameOf(bandCfg)}）`,
+                color: withAlpha(colorOf(bandCfg), 0.45), area: true });
+
+  if (visible("live", "actual")) {
+    datasets.push({
+      label: "真实收盘价",
+      data: bars.map(b => b.close).concat(new Array(futureTs.length).fill(null)),
+      borderColor: cssVar("--text-primary"), borderWidth: 2, tension: 0.15, pointRadius: 0,
+    });
+  }
+  legend.push({ id: "actual", label: "真实收盘价", color: cssVar("--text-primary") });
+
+  for (const c of configs()) {
+    const f = live[c.id];
+    legend.push({ id: c.id, label: c.name_zh, color: colorOf(c.id), dashed: true });
+    if (!f || !visible("live", c.id)) continue;
+    const series = new Array(labels.length).fill(null);
+    series[originIdx] = bars[originIdx].close;  // anchor the forecast to the last real print
+    for (const p of f.points) {
+      const i = idxOf.get(p.target_ts);
+      if (i != null) series[i] = p.median;
+    }
+    datasets.push({
+      label: c.name_zh, data: series, borderColor: colorOf(c.id), borderWidth: 2,
+      borderDash: [6, 4], tension: 0.15, pointRadius: 0,
+      endLabel: c.name_zh.split(" ")[0],
+    });
+  }
+
+  const options = baseOptions("liveTT", v => fmtPrice(v), "USDT");
+  upsertChart("live", "liveChart", {
+    type: "line",
+    data: { labels: labels.map(fmtTime), datasets },
+    options,
+    plugins: [crosshair, endLabels],
+  });
+  renderLegend("liveLegend", legend, "live");
+}
+
+function renderTrack() {
+  const d = state.data;
+  const trails = d.trails || {};
+  const byTs = new Map();
+  for (const c of configs()) {
+    for (const p of (trails[c.id] || [])) {
+      if (!byTs.has(p.target_ts)) byTs.set(p.target_ts, { actual: p.actual });
+      byTs.get(p.target_ts)[c.id] = p.median;
+    }
+  }
+  const stamps = [...byTs.keys()].sort((a, b) => a - b);
+  const host = document.getElementById("trackLegend");
+  if (!stamps.length) {
+    if (state.charts.track) { state.charts.track.destroy(); state.charts.track = null; }
+    const ctx = document.getElementById("trackChart").getContext("2d");
+    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    host.textContent = "";
+    const msg = document.createElement("div");
+    msg.className = "item";
+    msg.textContent = `还没有提前 ${leadMinutes()} 分钟的预测完成结算，`
+      + `服务运行 ${leadMinutes()} 分钟后这里会开始出现数据。`;
+    host.appendChild(msg);
+    return;
+  }
+
+  const datasets = [];
+  const legend = [{ id: "actual", label: "真实收盘价", color: cssVar("--text-primary") }];
+  if (visible("track", "actual")) {
+    datasets.push({
+      label: "真实收盘价", data: stamps.map(t => byTs.get(t).actual),
+      borderColor: cssVar("--text-primary"), borderWidth: 2, tension: 0.15, pointRadius: 0,
+    });
+  }
+  for (const c of configs()) {
+    legend.push({ id: c.id, label: c.name_zh, color: colorOf(c.id), dashed: true });
+    if (!visible("track", c.id)) continue;
+    datasets.push({
+      label: c.name_zh, data: stamps.map(t => byTs.get(t)[c.id] ?? null),
+      borderColor: colorOf(c.id), borderWidth: 2, borderDash: [6, 4], tension: 0.15,
+      pointRadius: 0, spanGaps: true, endLabel: c.name_zh.split(" ")[0],
+    });
+  }
+  upsertChart("track", "trackChart", {
+    type: "line",
+    data: { labels: stamps.map(fmtTime), datasets },
+    options: baseOptions("trackTT", v => fmtPrice(v), "USDT"),
+    plugins: [crosshair, endLabels],
+  });
+  renderLegend("trackLegend", legend, "track");
+}
+
+function renderMae() {
+  const metrics = state.data.metrics || [];
+  const steps = (metrics[0] && metrics[0].by_step) || [];
+  const labels = steps.map(s => s.minutes + " 分钟");
+  const datasets = [];
+  const legend = [];
+  for (const m of metrics) {
+    legend.push({ id: m.config_id, label: m.name_zh, color: colorOf(m.config_id) });
+    if (!visible("mae", m.config_id)) continue;
+    datasets.push({
+      label: m.name_zh,
+      data: m.by_step.map(s => s.mae),
+      borderColor: colorOf(m.config_id), backgroundColor: colorOf(m.config_id),
+      borderWidth: 2, tension: 0.2, pointRadius: 3, pointBorderWidth: 2,
+      pointBackgroundColor: cssVar("--surface-1"), spanGaps: true,
+      endLabel: m.name_zh.split(" ")[0],
+    });
+  }
+  upsertChart("mae", "maeChart", {
+    type: "line",
+    data: { labels, datasets },
+    options: baseOptions("maeTT", v => fmtNum(v, 3), "MAE (USDT)"),
+    plugins: [crosshair, endLabels],
+  });
+  renderLegend("maeLegend", legend, "mae");
+  renderStepTable();
+}
+
+/** Table view of the MAE chart - also the fallback when Chart.js is absent. */
+function renderStepTable() {
+  const metrics = state.data.metrics || [];
+  const steps = (metrics[0] && metrics[0].by_step) || [];
+  const table = document.getElementById("stepTable");
+  table.textContent = "";
+  const thead = table.createTHead().insertRow();
+  for (const h of ["提前量", ...metrics.map(m => m.name_zh), "样本"]) {
+    const th = document.createElement("th");
+    th.textContent = h;
+    thead.appendChild(th);
+  }
+  const tbody = table.createTBody();
+  steps.forEach((s, i) => {
+    const row = tbody.insertRow();
+    const c0 = row.insertCell(); c0.textContent = s.minutes + " 分钟";
+    const values = metrics.map(m => m.by_step[i] && m.by_step[i].mae);
+    const finite = values.filter(v => v != null && isFinite(v));
+    const best = finite.length ? Math.min(...finite) : null;
+    for (const v of values) {
+      const cell = row.insertCell();
+      cell.className = "num" + (best != null && v === best ? " best" : "");
+      cell.textContent = fmtNum(v, 3);
+    }
+    const cn = row.insertCell();
+    cn.className = "num";
+    cn.textContent = metrics.length ? String(metrics[0].by_step[i].n) : "0";
+  });
+}
+
+function renderMetricTable() {
+  const metrics = state.data.metrics || [];
+  const table = document.getElementById("metricTable");
+  table.textContent = "";
+  const head = table.createTHead().insertRow();
+  const cols = ["配置", "协变量", "样本", "MAE", "RMSE", "MAPE", "方向准确率",
+                "80% 覆盖率", "相对持平基线"];
+  for (const h of cols) {
+    const th = document.createElement("th");
+    th.textContent = h;
+    head.appendChild(th);
+  }
+  const maes = metrics.map(m => m.overall.mae).filter(v => v != null);
+  const bestMae = maes.length ? Math.min(...maes) : null;
+  const tbody = table.createTBody();
+  for (const m of metrics) {
+    const row = tbody.insertRow();
+    const nameCell = row.insertCell();
+    const sw = document.createElement("span");
+    sw.className = "swatch";
+    sw.style.background = colorOf(m.config_id);
+    nameCell.appendChild(sw);
+    nameCell.appendChild(document.createTextNode(m.name_zh));
+    const add = (text, cls) => {
+      const c = row.insertCell();
+      c.className = "num" + (cls ? " " + cls : "");
+      c.textContent = text;
+    };
+    add(String(m.num_covariates));
+    add(String(m.overall.n));
+    add(fmtNum(m.overall.mae, 3),
+        bestMae != null && m.overall.mae === bestMae ? "best" : "");
+    add(fmtNum(m.overall.rmse, 3));
+    add(fmtNum(m.overall.mape, 3, "%"));
+    add(fmtNum(m.overall.direction_acc, 1, "%"));
+    add(fmtNum(m.overall.coverage_80, 1, "%"));
+    const skill = m.overall.skill;
+    add(fmtNum(skill, 3), skill != null && skill < 1 ? "best" : "");
+  }
+}
+
+function sparkline(values) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 100 34");
+  svg.setAttribute("preserveAspectRatio", "none");
+  const lo = Math.min(...values), hi = Math.max(...values);
+  const span = hi - lo || 1;
+  const points = values.map((v, i) =>
+    `${(i / (values.length - 1 || 1)) * 100},${32 - ((v - lo) / span) * 30}`).join(" ");
+  const line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+  line.setAttribute("points", points);
+  line.setAttribute("fill", "none");
+  line.setAttribute("stroke", cssVar("--series-1"));
+  line.setAttribute("stroke-width", "1.5");
+  line.setAttribute("vector-effect", "non-scaling-stroke");
+  svg.appendChild(line);
+  return svg;
+}
+
+function renderChannels() {
+  const panel = document.getElementById("channelPanel");
+  const win = state.data.channels;
+  panel.textContent = "";
+  if (!win) {
+    const e = document.createElement("div");
+    e.className = "empty";
+    e.textContent = "等待第一次预测…";
+    panel.appendChild(e);
+    return;
+  }
+  const defs = state.data.definition.channels;
+  for (const [group, title] of [["technical", "技术指标 · 8"], ["derivative", "衍生品 · 5"]]) {
+    const head = document.createElement("div");
+    head.className = "grouphead";
+    head.textContent = title;
+    panel.appendChild(head);
+    const grid = document.createElement("div");
+    grid.className = "chgrid";
+    for (const def of defs.filter(d => d.group === group)) {
+      const series = win.channels[def.key] || [];
+      const card = document.createElement("div");
+      card.className = "ch";
+      card.title = def.detail + "\n来源: " + def.source;
+
+      const name = document.createElement("div");
+      name.className = "name";
+      const zh = document.createElement("span");
+      zh.textContent = def.label_zh;
+      const en = document.createElement("span");
+      en.className = "en";
+      en.textContent = def.label_en;
+      name.append(zh, en);
+
+      const val = document.createElement("div");
+      val.className = "val num";
+      val.textContent = series.length ? fmtNum(series[series.length - 1], 3) : "—";
+      const unit = document.createElement("span");
+      unit.className = "unit";
+      unit.textContent = def.unit;
+      val.appendChild(unit);
+
+      card.append(name, val);
+      if (series.length > 1) card.appendChild(sparkline(series));
+
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      const cov = document.createElement("span");
+      const pct = (win.coverage[def.key] ?? 0) * 100;
+      cov.textContent = "实测 " + pct.toFixed(0) + "%";
+      const range = document.createElement("span");
+      if (series.length) {
+        range.className = "num";
+        range.textContent = fmtNum(Math.min(...series), 2) + " ~ " + fmtNum(Math.max(...series), 2);
+      }
+      meta.append(cov, range);
+      card.appendChild(meta);
+      grid.appendChild(card);
+    }
+    panel.appendChild(grid);
+  }
+}
+
+function renderLog() {
+  const trails = state.data.trails || {};
+  const table = document.getElementById("logTable");
+  table.textContent = "";
+  const head = table.createTHead().insertRow();
+  for (const h of ["目标时间", "真实价", ...configs().map(c => c.name_zh + " 误差")]) {
+    const th = document.createElement("th");
+    th.textContent = h;
+    head.appendChild(th);
+  }
+  const byTs = new Map();
+  for (const c of configs()) {
+    for (const p of (trails[c.id] || [])) {
+      if (!byTs.has(p.target_ts)) byTs.set(p.target_ts, { actual: p.actual });
+      byTs.get(p.target_ts)[c.id] = p.median - p.actual;
+    }
+  }
+  const stamps = [...byTs.keys()].sort((a, b) => b - a).slice(0, 20);
+  const tbody = table.createTBody();
+  for (const ts of stamps) {
+    const row = tbody.insertRow();
+    const t = row.insertCell();
+    t.textContent = fmtTime(ts);
+    const a = row.insertCell();
+    a.className = "num";
+    a.textContent = fmtPrice(byTs.get(ts).actual);
+    const errs = configs().map(c => byTs.get(ts)[c.id]);
+    const finite = errs.filter(v => v != null && isFinite(v)).map(Math.abs);
+    const best = finite.length ? Math.min(...finite) : null;
+    for (const e of errs) {
+      const cell = row.insertCell();
+      cell.className = "num" + (best != null && Math.abs(e) === best ? " best" : "");
+      cell.textContent = e == null ? "—" : (e > 0 ? "+" : "") + e.toFixed(2);
+    }
+  }
+  if (!stamps.length) {
+    const row = tbody.insertRow();
+    const cell = row.insertCell();
+    cell.colSpan = configs().length + 2;
+    cell.className = "empty";
+    cell.style.textAlign = "center";
+    cell.textContent = "暂无已结算的预测";
+  }
+}
+
+function renderHeader() {
+  const d = state.data;
+  const s = d.status;
+  document.getElementById("instSub").textContent = `${s.inst_id} · ${s.bar} K 线 · OKX`;
+  document.getElementById("engineBadge").textContent =
+    `${s.engine}${s.device ? " · " + s.device : ""}`;
+  document.getElementById("ctxBadge").textContent =
+    `上下文 ${s.context_bars} 根 / ${s.context_minutes} 分钟 ≈ ${s.context_hours} 小时`;
+  document.getElementById("ctxNote").textContent =
+    `${s.context_bars} 根 / ${s.context_minutes} 分钟`;
+  document.getElementById("horizonMin").textContent = String(s.horizon_minutes);
+  for (const id of ["leadMinTitle", "leadMinTitle2", "leadMinTitle3"]) {
+    document.getElementById(id).textContent = String(leadMinutes());
+  }
+
+  const alertBox = document.getElementById("engineAlert");
+  if (!s.is_foundation_model) {
+    alertBox.hidden = false;
+    alertBox.textContent =
+      `当前引擎是「${s.engine}」占位基线，不是 TimesFM 预测结果。` +
+      `请在拿到 TimesFM 3.0 权重后用 --engine timesfm 重新启动。`;
+  } else {
+    alertBox.hidden = true;
+  }
+
+  const errBox = document.getElementById("errorAlert");
+  if (s.last_error) {
+    errBox.hidden = false;
+    errBox.textContent = `最近一次轮询失败（连续 ${s.consecutive_errors} 次）：${s.last_error}`;
+  } else {
+    errBox.hidden = true;
+  }
+
+  const badge = document.getElementById("statusBadge");
+  badge.textContent = "";
+  const dot = document.createElement("span");
+  const staleMs = s.server_ms - (s.last_poll_ms || 0);
+  const stale = !s.last_poll_ms || staleMs > s.poll_seconds * 3000;
+  dot.className = "dot" + (stale ? " stale" : "");
+  badge.className = "badge " + (stale ? "warn" : "live");
+  badge.append(dot, document.createTextNode(
+    stale ? "数据陈旧" : `运行中 · 已轮询 ${s.poll_count} 次`));
+  document.getElementById("updatedAt").textContent =
+    "更新于 " + (s.last_poll_ms ? fmtTime(s.last_poll_ms) : "—");
+
+  const t = d.ticker;
+  const bars = d.bars || [];
+  const last = t ? t.last : (bars.length ? bars[bars.length - 1].close : null);
+  document.getElementById("lastPrice").textContent = fmtPrice(last);
+  const chg = document.getElementById("priceChange");
+  if (t && t.open_24h) {
+    const pct = (t.last / t.open_24h - 1) * 100;
+    chg.textContent = `24 小时 ${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`;
+    chg.className = "foot num " + (pct >= 0 ? "up" : "down");
+  }
+
+  const full = (d.live || {}).full;
+  const nextEl = document.getElementById("nextPred");
+  const deltaEl = document.getElementById("nextPredDelta");
+  if (full && full.points.length && last != null) {
+    const p = full.points[0].median;
+    nextEl.textContent = fmtPrice(p);
+    const diff = p - full.origin_close;
+    deltaEl.textContent = `相对起点 ${diff >= 0 ? "+" : ""}${diff.toFixed(2)} USDT`;
+    deltaEl.className = "foot num " + (diff >= 0 ? "up" : "down");
+  } else {
+    nextEl.textContent = "—";
+    deltaEl.textContent = "等待第一次预测";
+    deltaEl.className = "foot num";
+  }
+
+  const metrics = d.metrics || [];
+  const scored = metrics.reduce((a, m) => a + m.overall.n, 0);
+  document.getElementById("scoredN").textContent = String(scored);
+  document.getElementById("pendingN").textContent =
+    "待结算 " + metrics.reduce((a, m) => a + m.pending, 0);
+  const ranked = metrics.filter(m => m.overall.mae != null)
+                        .sort((a, b) => a.overall.mae - b.overall.mae);
+  document.getElementById("bestConfig").textContent = ranked.length ? ranked[0].name_zh : "—";
+  document.getElementById("bestConfigMae").textContent = ranked.length
+    ? `MAE ${ranked[0].overall.mae.toFixed(3)} · 相对持平基线 ${fmtNum(ranked[0].overall.skill, 3)}`
+    : "样本不足";
+}
+
+/** Charts are an enhancement: a failure in one must not take the page down.
+ *  Every value a chart shows is also in a table below it, so the numeric views
+ *  are rendered unconditionally. */
+function guarded(name, fn) {
+  try { fn(); } catch (err) { console.error(name + " failed:", err); }
+}
+
+function render() {
+  if (!state.data) return;
+  guarded("header", renderHeader);
+  if (window.Chart) {
+    guarded("liveChart", renderLive);
+    guarded("trackChart", renderTrack);
+    guarded("maeChart", renderMae);
+  } else {
+    renderChartsUnavailable();
+    guarded("maeTable", renderStepTable);
+  }
+  guarded("metricTable", renderMetricTable);
+  guarded("channels", renderChannels);
+  guarded("log", renderLog);
+  const leads = leadChoices();
+  document.querySelectorAll("#leadSeg button").forEach((b, i) =>
+    b.setAttribute("aria-pressed", String(leads[i] && leads[i][0] === state.lead)));
+  document.querySelectorAll("#rangeSeg button").forEach((b, i) =>
+    b.setAttribute("aria-pressed", String(RANGE_CHOICES[i][0] === state.rangeBars)));
+  document.querySelectorAll("#bandSeg button").forEach((b, i) =>
+    b.setAttribute("aria-pressed", String(configs()[i] && configs()[i].id === state.bandConfig)));
+}
+
+function renderChartsUnavailable() {
+  for (const [boxId, legendId] of [["liveChart", "liveLegend"],
+                                   ["trackChart", "trackLegend"],
+                                   ["maeChart", "maeLegend"]]) {
+    const canvas = document.getElementById(boxId);
+    if (canvas && canvas.parentNode) canvas.parentNode.style.display = "none";
+    const legend = document.getElementById(legendId);
+    if (!legend) continue;
+    legend.textContent = "";
+    const msg = document.createElement("div");
+    msg.className = "item";
+    msg.textContent = "图表库未加载，下方表格仍是完整数据。";
+    legend.appendChild(msg);
+  }
+}
+
+let inflight = false;
+async function refresh() {
+  if (inflight) return;
+  inflight = true;
+  try {
+    const res = await fetch(`/api/state?bars=${state.rangeBars}&lead=${state.lead}`);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const previousHorizon = state.data && state.data.definition.horizon_bars;
+    state.data = await res.json();
+    if (state.data.lead && state.data.lead !== state.lead) state.lead = state.data.lead;
+    if (previousHorizon !== state.data.definition.horizon_bars) buildSegments();
+    render();
+  } catch (err) {
+    const box = document.getElementById("errorAlert");
+    box.hidden = false;
+    box.textContent = "无法连接后端：" + err.message;
+  } finally {
+    inflight = false;
+  }
+}
+
+refresh();
+setInterval(refresh, 15000);
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
+</script>
+</body>
+</html>

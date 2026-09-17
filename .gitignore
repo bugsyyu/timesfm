@@ -21,6 +21,8 @@ gift-eval/
 TimesFM-3_multivariate/
 time_benchmark_leaderboard.csv
 *.html
+# ...but the realtime dashboard is source, not a generated artifact.
+!timesfm3-usage/zec-realtime/static/*.html
 
 # Logs & Temporary files
 uv.lock
