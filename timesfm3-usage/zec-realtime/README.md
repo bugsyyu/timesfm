@@ -74,6 +74,16 @@ TradingView 的归属 logo 保留在图表左下角。
 
 ---
 
+## 架构
+
+![架构图](docs/architecture.svg)
+
+一条直线：**OKX → 对齐 → TimesFM → SQLite → HTTP → 页面**，加上一个把它变成实验的时序约定 ——
+预测在它要预测的 K 线还不存在时就落库，之后靠 `JOIN ... ON b.ts = p.target_ts` 结算。
+没有任何一步能看见未来，所以准确度表在结构上就是样本外的。
+
+---
+
 ## 设计
 
 ### 目标与窗口
